@@ -10,13 +10,13 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_secure_storage: 11.2.0
-  sqflite_common: 2.5.10
+  sqflite_common: 2.5.6+1
   sqflite_sqlcipher: 3.4.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
-  sqflite_common_ffi: 2.4.5
+  sqflite_common_ffi: 2.3.7+1
 
 flutter:
   uses-material-design: false
