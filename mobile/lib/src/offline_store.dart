@@ -21,6 +21,8 @@ class OfflineOperation {
     required this.operationType,
     required this.payload,
     required this.transportState,
+    required this.baseServerVersion,
+    required this.clientCreatedAt,
     this.businessState,
     this.serverVersion,
     this.serverSequence,
@@ -32,6 +34,8 @@ class OfflineOperation {
   final String operationType;
   final Map<String, Object?> payload;
   final String transportState;
+  final int baseServerVersion;
+  final DateTime clientCreatedAt;
   final String? businessState;
   final int? serverVersion;
   final int? serverSequence;
@@ -46,6 +50,8 @@ class OfflineOperation {
         jsonDecode(row['payload_json']! as String) as Map,
       ),
       transportState: row['transport_state']! as String,
+      baseServerVersion: row['base_server_version']! as int,
+      clientCreatedAt: DateTime.parse(row['client_created_at']! as String),
       businessState: row['business_state'] as String?,
       serverVersion: row['server_version'] as int?,
       serverSequence: row['server_sequence'] as int?,
@@ -257,6 +263,7 @@ class OfflineStore {
   }
 
   Future<List<OfflineOperation>> pendingOperations({
+    String? relationshipId,
     int limit = 50,
     DateTime? now,
   }) async {
@@ -270,11 +277,12 @@ class OfflineStore {
       FROM local_operations AS operations
       INNER JOIN outbox USING(operation_id)
       WHERE operations.transport_state IN ('queued','sending')
+        AND (? IS NULL OR operations.relationship_id = ?)
         AND (outbox.next_attempt_at IS NULL OR outbox.next_attempt_at <= ?)
       ORDER BY outbox.queued_at, operations.operation_id
       LIMIT ?
       ''',
-      [timestamp, limit],
+      [relationshipId, relationshipId, timestamp, limit],
     );
     return rows.map(OfflineOperation.fromRow).toList();
   }
