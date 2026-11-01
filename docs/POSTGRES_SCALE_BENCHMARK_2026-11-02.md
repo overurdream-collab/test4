@@ -60,19 +60,19 @@ The full EXPLAIN ANALYZE output is retained in the linked workflow logs.
 ## Interpretation — do not overclaim
 
 1. The relationship-scoped event index performs well on this synthetic 1M-event dataset on the stated CI runner.
-2. Read p95 rises from 0.83 ms at one worker to 42.41 ms at 50 workers; throughput gains flatten. This indicates contention/saturation as concurrency increases and warrants a longer profile.
-3. Operation-intake write throughput rises from one to ten workers, then is nearly flat at 50 while latency rises. Investigate counter-row locks, WAL, connection pool pressure, and CPU before scaling.
-4. These figures are short 5-second phases, not a soak test. They do not include TLS, production authentication, API process overhead, mobile networks, attachments, backups, financial approval posting, or physical devices.
-5. This benchmark is not evidence of one million concurrent users. It only measures one database path at one million stored operation/event rows.
+2. Event-feed p95 rises from 0.85 ms at one worker to 45.36 ms at 50 workers; throughput gains flatten.
+3. Supply operation-intake p95 rises from 0.75 ms to 21.21 ms at 50 workers; write throughput is nearly flat between 10 and 50 workers.
+4. The full financial lifecycle is the current bottleneck: p95 rises from 10.08 ms at one worker to 591.96 ms at 50, while throughput falls from 196.32 lifecycles/s at 10 workers to 128.74 at 50. This requires profiling and optimization before scaling concurrency.
+5. The benchmark uses 1,000 relationships and evenly distributed synthetic traffic. It does not model one million users, skewed hot merchants, real API/TLS/auth overhead, mobile networks, attachments, backup traffic, or long-duration operation.
+6. Each phase lasts only five seconds. Treat these as directional microbenchmarks, not service-level objectives or production capacity guarantees.
 
 ## Next performance work
 
-- Add a separate benchmark for approval plus financial materialization and journal postings.
-- Run longer 60–300 second phases and include concurrency 100 only after connection-pool and DB wait metrics are captured.
-- Record CPU, WAL bytes, lock waits, active connections, cache hit ratio, and memory during the run.
-- Benchmark skewed hot relationships as well as evenly distributed relationships.
-- Derive capacity targets only after the user confirms DAU, transactions per user, peak sync bursts, and attachment volumes.
-
-The earlier Run #3 was a baseline without the financial lifecycle phase; Run #9 supersedes its read/intake figures and adds the financial lifecycle measurement.
+- Run longer 60–300 second phases to expose steady-state behavior.
+- Capture pg_stat_activity wait events, pg_locks, WAL bytes, active connections, CPU, memory, and cache hit ratio during financial lifecycle load.
+- Compare evenly distributed traffic with hot-relationship skew and simultaneous approvals against the same obligation/payment.
+- Profile journal triggers and account upsert contention; optimize only after identifying measured bottlenecks.
+- Add attachment and backup/restore load only after those components exist.
+- Derive capacity targets after confirming DAU, transactions per user, peak sync bursts, and attachment volumes.
 
 No production database or paid infrastructure was used.
