@@ -602,27 +602,27 @@ PRD 1.1 يطرح:
 - `docs/LEDGER_AND_SYNC_SPEC.md`: مواصفات الدفتر المالي والمزامنة.
 - `.github/workflows/ledger-db-tests.yml`: workflow لاختبارات PostgreSQL عند تحقق شروط المسارات.
 
-ملفات نموذج PostgreSQL الأولي موجودة في فرع:
-- `prototype/postgres-journal-core`
-- `db/migrations/001_core_ledger.sql`
-- `db/tests/001_core_ledger_test.sql`
-
-PR النموذج الأولي:
-- [PR #3](https://github.com/overurdream-collab/test4/pull/3)
-- عنوانه: Prototype PostgreSQL append-only ledger core.
-- آخر SHA معروف للفرع عند إعداد هذه الوثيقة: `09bfdde94b0073e5176ee5c9ef5a46d79a773204`.
-- آخر حالة API شوهدت: PR مفتوح، غير مدمج، وقابل للدمج. تحقق من الحالة مرة أخرى قبل التصرف.
-- لا يوجد حتى الآن دليل Run ناجح لاختبارات PostgreSQL في سجلات الأداة التي تم فحصها. لا تعتبر الاختبارات ناجحة.
+الملفات التنفيذية الحالية على main:
+- `db/migrations/001_core_ledger.sql` إلى `004_offline_sync_inbox_events.sql`
+- اختبارات قاعدة البيانات المقابلة داخل `db/tests/`
+- `server/src/approval-api.ts`
+- `server/src/sync-api.ts`
+- `mobile/lib/src/offline_store.dart`
+- `mobile/lib/src/sync_coordinator.dart`
+- `mobile/lib/src/http_sync_transport.dart`
 
 ### تاريخ GitHub المعروف
 
-- PR #1: تأسيس `docs/PROJECT_FOUNDATION.md`؛ دُمج في main. Merge SHA المعروف: `5a2ebdc9d1e0cf5c668a6432569ba41b4d8218b7`.
-- PR #2: مواصفات الدفتر والمزامنة؛ دُمج في main. تحقق من سجل GitHub الحالي للحصول على SHA الدقيق إذا احتجته.
-- PR #4: إضافة workflow لاختبارات PostgreSQL؛ دُمج. Merge SHA: `0e2f1241dad4374207fc15faa7d35c02e0c573e8`.
-- PR #3: نموذج قاعدة البيانات والاختبارات؛ لا تعتبره مدمجًا حتى يؤكد GitHub ذلك صراحة.
+- PR #1: تأسيس الوثائق؛ مدمج.
+- PR #2: مواصفات الدفتر والمزامنة؛ مدمج.
+- PR #3: PostgreSQL append-only core؛ مدمج، SHA: `2ba73f3cfc0eb7a8ca4da857de906a81d6db9947`.
+- PR #7: الالتزامات والمدفوعات والتخصيص والموافقات؛ مدمج، SHA: `66d0b9aba50b1b69ab3fb97ce0dc648adf56ec69`.
+- PR #8: واجهة HTTP للموافقة/الرفض؛ مدمج، SHA: `725f4509a5cd39c80a459dfc8bb92811ab5a721f`.
+- PR #9: استقبال العمليات وموجز الأحداث؛ مدمج، SHA: `6a61306122d9ddd57ad4f83b1a72a103cb50df76`.
+- PR #10: طبقة Flutter للتخزين المحلي والمزامنة؛ مدمج، SHA: `9451eb5e1096880ecef261a383bd166094158140`.
+- PR #11: اختبار أداء مليون حدث؛ مفتوح وقت آخر تحديث.
 
-ملاحظة: بيانات المستودع والـ PRs تتغير. هذه خريطة آخر تحقق وليست بديلًا عن فحص GitHub المباشر.
-
+ملاحظة: هذه خريطة آخر تحقق. افحص GitHub مباشرة قبل أي إجراء جديد.
 ---
 
 ## 17. الحالة التنفيذية المثبتة — 2026-11-02
