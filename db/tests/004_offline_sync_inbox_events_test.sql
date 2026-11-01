@@ -141,5 +141,6 @@ BEGIN
 END;
 $$;
 
+SET CONSTRAINTS ALL IMMEDIATE;
 ROLLBACK;
 SELECT 'offline inbox and event feed tests passed' AS result;
