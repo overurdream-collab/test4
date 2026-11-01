@@ -28,7 +28,7 @@ BEGIN
     '73000000-0000-0000-0000-000000000001',
     'credit_charge',
     decode(repeat('ab',32),'hex'),
-    '{"amountMinor":1500,"currency":"YER","description":"Offline test"}'::jsonb,
+    '{"amountMinor":1500,"currency":"YER","description":"Offline test","creditorUserId":"23000000-0000-0000-0000-000000000001","debtorUserId":"23000000-0000-0000-0000-000000000002"}'::jsonb,
     0,1,now()
   );
   IF accepted.outcome <> 'accepted' OR accepted.server_sequence <> 1
@@ -43,7 +43,7 @@ BEGIN
     '73000000-0000-0000-0000-000000000001',
     'credit_charge',
     decode(repeat('ab',32),'hex'),
-    '{"amountMinor":1500,"currency":"YER","description":"Offline test"}'::jsonb,
+    '{"amountMinor":1500,"currency":"YER","description":"Offline test","creditorUserId":"23000000-0000-0000-0000-000000000001","debtorUserId":"23000000-0000-0000-0000-000000000002"}'::jsonb,
     0,1,now()
   );
   IF replay.outcome <> 'already_processed' OR replay.server_sequence <> 1 THEN
@@ -58,7 +58,7 @@ BEGIN
       '73000000-0000-0000-0000-000000000001',
       'credit_charge',
       decode(repeat('cd',32),'hex'),
-      '{"amountMinor":1501,"currency":"YER"}'::jsonb,
+      '{"amountMinor":1501,"currency":"YER","creditorUserId":"23000000-0000-0000-0000-000000000001","debtorUserId":"23000000-0000-0000-0000-000000000002"}'::jsonb,
       0,1,now()
     );
     RAISE EXCEPTION 'Changed operation envelope reused same operation ID';
@@ -112,6 +112,22 @@ BEGIN
       AND event_payload->>'businessState'='approved'
   ) THEN
     RAISE EXCEPTION 'Approval state change event missing';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM ledger.obligations
+    WHERE source_operation_id='33000000-0000-0000-0000-000000000001'
+      AND amount_minor=1500 AND currency='YER'
+  ) THEN
+    RAISE EXCEPTION 'Approved credit charge did not materialize as an obligation';
+  END IF;
+  IF (SELECT net_position_minor FROM ledger.member_currency_positions
+      WHERE relationship_id='13000000-0000-0000-0000-000000000001'
+        AND owner_user_id='23000000-0000-0000-0000-000000000001' AND currency='YER') <> 1500
+     OR (SELECT net_position_minor FROM ledger.member_currency_positions
+      WHERE relationship_id='13000000-0000-0000-0000-000000000001'
+        AND owner_user_id='23000000-0000-0000-0000-000000000002' AND currency='YER') <> -1500 THEN
+    RAISE EXCEPTION 'Approved offline charge did not reconcile to the journal';
   END IF;
 
   BEGIN
