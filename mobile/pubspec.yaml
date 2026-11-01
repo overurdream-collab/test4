@@ -10,7 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_secure_storage: 11.2.0
-  sqflite_common: 1.0.0
+  sqflite_common: 2.5.10
   sqflite_sqlcipher: 3.4.1
 
 dev_dependencies:
