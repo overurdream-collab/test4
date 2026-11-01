@@ -303,14 +303,16 @@ BEGIN
       USING ERRCODE = '23514';
   END IF;
 
-  IF TG_TABLE_NAME = 'obligations' AND op.actor_user_id <> NEW.creditor_user_id THEN
-    RAISE EXCEPTION 'Credit charge must be created by its creditor'
-      USING ERRCODE = '42501';
-  END IF;
-  IF TG_TABLE_NAME = 'payments'
-     AND op.actor_user_id NOT IN (NEW.payer_user_id, NEW.payee_user_id) THEN
-    RAISE EXCEPTION 'Payment actor must be one of its parties'
-      USING ERRCODE = '42501';
+  IF TG_TABLE_NAME = 'obligations' THEN
+    IF op.actor_user_id <> NEW.creditor_user_id THEN
+      RAISE EXCEPTION 'Credit charge must be created by its creditor'
+        USING ERRCODE = '42501';
+    END IF;
+  ELSIF TG_TABLE_NAME = 'payments' THEN
+    IF op.actor_user_id NOT IN (NEW.payer_user_id, NEW.payee_user_id) THEN
+      RAISE EXCEPTION 'Payment actor must be one of its parties'
+        USING ERRCODE = '42501';
+    END IF;
   END IF;
   RETURN NEW;
 END;
