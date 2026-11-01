@@ -87,7 +87,6 @@ class FakeSyncServer implements SyncTransport {
   }
 
   void approve(String relationshipId, String operationId) {
-    final original = operations[operationId]!;
     final sequence = (sequences[relationshipId] ?? 0) + 1;
     sequences[relationshipId] = sequence;
     feeds[relationshipId]!.add(
