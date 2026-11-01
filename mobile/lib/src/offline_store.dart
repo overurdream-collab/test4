@@ -446,6 +446,12 @@ class OfflineStore {
               event.createdAt.toUtc().toIso8601String(),
             ],
           );
+          // A server event proves acceptance even if the HTTP response was lost.
+          await transaction.delete(
+            'outbox',
+            where: 'operation_id = ?',
+            whereArgs: [event.operationId],
+          );
         } else if (event.eventType == 'operation.state_changed') {
           final businessState = event.payload['businessState'] as String?;
           final serverVersion = (event.payload['serverVersion'] as num?)?.toInt();
