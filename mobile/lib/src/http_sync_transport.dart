@@ -51,7 +51,7 @@ class HttpSyncTransport implements SyncTransport {
     request.headers
       ..set(HttpHeaders.authorizationHeader, 'Bearer $token')
       ..contentType = ContentType.json
-      ..accept = ContentType.json;
+      ..set(HttpHeaders.acceptHeader, ContentType.json.mimeType);
     if (body != null) request.write(jsonEncode(body));
 
     final response = await request.close().timeout(requestTimeout);
