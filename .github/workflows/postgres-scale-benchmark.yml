@@ -1,0 +1,60 @@
+name: PostgreSQL million-event scale benchmark
+
+on:
+  pull_request:
+    paths:
+      - "db/benchmarks/**"
+      - "server/bench/**"
+      - ".github/workflows/postgres-scale-benchmark.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  scale-benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ledger_test
+          POSTGRES_PASSWORD: ledger_test
+          POSTGRES_DB: ledger_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ledger_test -d ledger_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install PostgreSQL client and report runner resources
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          nproc
+          free -h
+      - name: Install benchmark dependencies
+        working-directory: server
+        run: npm install --no-package-lock --no-audit --no-fund
+      - name: Apply PostgreSQL migrations
+        env:
+          PGPASSWORD: ledger_test
+        run: |
+          for migration in db/migrations/001_core_ledger.sql db/migrations/002_obligations_payments_approvals.sql db/migrations/003_approval_idempotency_reason.sql db/migrations/004_offline_sync_inbox_events.sql; do
+            psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f "$migration"
+          done
+      - name: Seed one million operations and events
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/benchmarks/001_seed_one_million_events.sql
+      - name: Run read and write concurrency benchmarks
+        working-directory: server
+        env:
+          DATABASE_URL: postgres://ledger_test:ledger_test@localhost:5432/ledger_test
+        run: node bench/postgres-scale.mjs
