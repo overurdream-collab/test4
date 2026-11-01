@@ -53,7 +53,7 @@ void main() {
       baseUri: Uri.parse('http://127.0.0.1:${server.port}/'),
       accessTokenProvider: () async => 'test-token',
     );
-    const operation = OfflineOperation(
+    final operation = OfflineOperation(
       operationId: '33000000-0000-0000-0000-000000000001',
       relationshipId: '13000000-0000-0000-0000-000000000001',
       operationType: 'credit_charge',
@@ -99,7 +99,7 @@ void main() {
       accessTokenProvider: () async => 'test-token',
     );
 
-    const operation = OfflineOperation(
+    final operation = OfflineOperation(
       operationId: '33000000-0000-0000-0000-000000000002',
       relationshipId: '13000000-0000-0000-0000-000000000001',
       operationType: 'credit_charge',
