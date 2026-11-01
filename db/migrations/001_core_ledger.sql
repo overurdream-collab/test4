@@ -1,7 +1,6 @@
 -- Shared commercial ledger: first PostgreSQL journal prototype.
 -- This is a prototype migration, not yet a production-ready application schema.
 
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE SCHEMA IF NOT EXISTS ledger;
 
 CREATE TABLE ledger.relationships (
@@ -23,7 +22,7 @@ CREATE TABLE ledger.operations (
   relationship_id uuid NOT NULL,
   actor_user_id uuid NOT NULL,
   operation_type text NOT NULL,
-  request_hash bytea NOT NULL,
+  request_hash bytea NOT NULL CHECK (octet_length(request_hash) = 32),
   business_state text NOT NULL CHECK (
     business_state IN ('awaiting_counterparty', 'approved', 'rejected', 'disputed', 'cancelled')
   ),
