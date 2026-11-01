@@ -2,9 +2,12 @@
 
 A Yemen-first, offline-first platform for recording and reconciling financial obligations across commercial relationships.
 
-## Project status
+## Current engineering status
 
-This repository is being initialized. No production application code, deployment, or automated test suite exists yet.
+- PostgreSQL 16 append-only journal core is merged and its invariant suite passes.
+- Relationship-scoped obligations, payments, explicit allocations, approval decisions, and journal-based member positions are merged and tested.
+- An initial TypeScript/Fastify approval HTTP boundary is under review in PR #8; it requires a real authentication resolver before exposure.
+- No mobile application, encrypted local outbox, complete sync API, two-device test, load benchmark, production database, or deployment exists yet.
 
 ## Product direction
 
@@ -17,16 +20,15 @@ This repository is being initialized. No production application code, deployment
 
 ## Engineering approach
 
-Start with a documented modular-monolith architecture and validate the data model, ledger invariants, and offline synchronization protocol before broad UI implementation. Keep `main` stable; implement work on feature branches and merge through reviewed pull requests.
+Build and validate the financial core before UI work. Use feature branches and reviewed pull requests. Do not connect a production database, deploy, or incur paid costs without explicit approval.
 
 ## Documentation and handoff
-
-Start here when joining or transferring the project:
 
 1. [Complete Arabic project handoff](docs/MASTER_HANDOFF_AR.md)
 2. [Arabic product requirements and PRD reconciliation](docs/PRODUCT_REQUIREMENTS_AR.md)
 3. [Current project status and next steps](docs/PROJECT_STATUS_AND_NEXT_STEPS_AR.md)
 4. [Project foundation](docs/PROJECT_FOUNDATION.md)
 5. [Ledger and offline synchronization specification](docs/LEDGER_AND_SYNC_SPEC.md)
+6. [API and offline sync implementation contract](docs/IMPLEMENTATION_API_OFFLINE_SYNC_AR.md)
 
-The handoff document identifies approved decisions, historical PRD requirements, deferred scope, open decisions, GitHub evidence, and the exact next engineering task. Do not treat proposed architecture or unrun tests as implemented or passing.
+The handoff documents distinguish implemented code, passing tests, proposals, and unfinished work. Do not describe proposed features or unrun tests as complete.

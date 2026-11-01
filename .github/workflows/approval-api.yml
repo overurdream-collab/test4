@@ -1,0 +1,28 @@
+name: Approval API checks
+
+on:
+  pull_request:
+    paths:
+      - "server/**"
+      - ".github/workflows/approval-api.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  approval-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install dependencies
+        working-directory: server
+        run: npm install --no-package-lock --no-audit --no-fund
+      - name: Type check
+        working-directory: server
+        run: npm run typecheck
+      - name: Unit tests
+        working-directory: server
+        run: npm test
