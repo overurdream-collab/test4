@@ -58,3 +58,12 @@ jobs:
         env:
           PGPASSWORD: ledger_test
         run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/tests/003_approval_idempotency_reason_test.sql
+
+      - name: Apply offline sync inbox and event feed migration
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/migrations/004_offline_sync_inbox_events.sql
+      - name: Run offline sync inbox and event feed tests
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/tests/004_offline_sync_inbox_events_test.sql
