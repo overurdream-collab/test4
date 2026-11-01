@@ -52,7 +52,7 @@
 - `db/migrations/001_core_ledger.sql`
 - `db/tests/001_core_ledger_test.sql`
 
-بعد دمج هذا التحديث ستوجد:
+أصبحت الملفات التالية موجودة على `main` بعد دمج PR #5:
 - `docs/MASTER_HANDOFF_AR.md`
 - `docs/PRODUCT_REQUIREMENTS_AR.md`
 - `docs/PROJECT_STATUS_AND_NEXT_STEPS_AR.md`
