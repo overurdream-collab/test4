@@ -3,7 +3,7 @@ name: PostgreSQL million-event scale benchmark
 on:
   pull_request:
     paths:
-      - "db/benchmarks/**"
+      - "db/benchmarks/*.sql"
       - "server/bench/**"
       - ".github/workflows/postgres-scale-benchmark.yml"
 
