@@ -3,7 +3,7 @@
 **آخر تحديث:** 2026-11-02  
 **المستودع:** https://github.com/overurdream-collab/test4  
 **الفرع الأساسي:** main  
-**آخر merge على main:** 9451eb5e1096880ecef261a383bd166094158140
+**آخر merge على main:** 8750e3a5b53bbd396735f43d2cd1cc8cafdb9c32
 
 ## 1. الخلاصة التنفيذية
 
@@ -14,7 +14,7 @@
 - لم يُختبر SQLCipher الأصلي أو secure storage على Android/iOS فعليًا.
 - محاكاة جهازين تستخدم قاعدتي SQLite محليتين وخادمًا وهميًا؛ لم يجر اختبار هاتفين حقيقيين مع PostgreSQL.
 - لا توجد سياسة backup/key recovery مثبتة.
-- لا توجد نتائج حمل نهائية حتى الآن؛ PR #11 قيد التشغيل.
+- اختبار مليون عملية/حدث ودورة مالية مكتمل في PR #11؛ القياس أظهر اختناقًا عند التزامن 50 في دورة الترحيل المالي. لا تزال هناك حاجة لاختبارات أطول وتحليل الأقفال وWAL.
 - لا توجد واجهات مستخدم، ولا قاعدة إنتاجية، ولا نشر.
 
 ## 2. ما نُفذ وجرى دمجه
@@ -28,10 +28,11 @@
 | مخزن محلي وطابور outbox ومطبق الأحداث | مدمج كنواة برمجية | PR #10، merge 9451eb5؛ Flutter Run #21 |
 | HTTP sync transport وSyncCoordinator | مدمج ومختبر بمحاكاة | PR #10؛ Run #21 |
 | اختبار عميلين محليين | محاكاة ناجحة | قاعدتا SQLite منفصلتان + fake server؛ لا يعادل هاتفين فعليين |
+| قياس مليون عملية/حدث + دورة مالية | مدمج ومختبر | PR #11، Run #9؛ التفاصيل في docs/POSTGRES_SCALE_BENCHMARK_2026-11-02.md |
 | SQLCipher native encryption | غير مثبت | يحتاج Android/iOS emulator أو جهاز فعلي |
 | المصادقة الإنتاجية وتسجيل الأجهزة | غير منفذ | يحتاج اختيار مزود/آلية آمنة |
 | backup/key recovery | غير منفذ | بوابة قبل تجربة مالية حقيقية |
-| اختبار الأداء بمليون حدث | قيد التنفيذ | PR #11 |
+| اختبار الأداء بمليون حدث ودورة مالية | القياس الأولي مكتمل؛ profiling/soak test متبقي | PR #11، Run #9 |
 | UI / admin panel | مؤجل | لن يبدأ قبل اجتياز بوابات صحة الرصيد والتزامن |
 
 ### اختبارات PostgreSQL
@@ -60,17 +61,17 @@
 - PR #8 — approval HTTP API: مدمج، SHA: 725f4509a5cd39c80a459dfc8bb92811ab5a721f.
 - PR #9 — operation inbox/event feed: مدمج، SHA: 6a61306122d9ddd57ad4f83b1a72a103cb50df76.
 - PR #10 — mobile offline store/sync coordinator: مدمج، SHA: 9451eb5e1096880ecef261a383bd166094158140.
-- PR #11 — million-event PostgreSQL benchmark: مفتوح؛ لا تعتمد أرقامًا حتى ينتهي التشغيل وتراجع النتائج.
+- PR #11 — million-event + financial lifecycle benchmark: مدمج، SHA: 8750e3a5b53bbd396735f43d2cd1cc8cafdb9c32؛ Run #9 ناجح.
 
 ## 4. ما تبقى للوصول إلى نواة قابلة للاستخدام
 
-### P0 — إكمال اختبار الأداء
+### P0 — تحليل اختناق الأداء وتحسينه
 
-1. تشغيل seed لمليون عملية ومليون حدث على PostgreSQL 16.
-2. قياس event-feed reads وoperation-intake writes عند concurrency 1/10/50.
-3. تسجيل throughput وp50/p95/p99 وEXPLAIN BUFFERS.
-4. تحليل نقاط الاختناق؛ لا نستنتج قدرة مليون مستخدم من حجم مليون سجل.
-5. توثيق بيئة الاختبار وقيود GitHub runner.
+1. القياس الأولي لمليون عملية ومليون حدث اكتمل على PostgreSQL 16.15، مع قياس event feed وoperation inbox ودورة مالية كاملة (credit charge + payment + allocation + journal posting).
+2. في دورة الترحيل المالي، هبط throughput من 196.32 lifecycle/s عند concurrency 10 إلى 128.74 عند concurrency 50، وارتفع p95 إلى 591.96 ms.
+3. افحص pg_stat_activity وpg_locks وWAL وCPU وconnection pool، ثم حدد إن كان الاختناق من أقفال حسابات الأطراف أو counters أو محفزات journal.
+4. أعد القياس بعد كل إصلاح مع نفس seed، ثم نفذ soak test لمدة 60–300 ثانية وhot-relationship skew.
+5. لا نستنتج قدرة مليون مستخدم من حجم مليون سجل؛ يجب تثبيت DAU/peak writes/sync bursts/attachments أولًا.
 
 ### P1 — إثبات التشفير والاستعادة
 
@@ -119,6 +120,6 @@
 
 ## 7. أول مهمة للوكيل التالي
 
-1. افحص PR #11 ونتيجة benchmark.
-2. لا تدمجه قبل تحليل الأرقام وتوثيق حدودها.
-3. بعد ذلك ابدأ مراجعة SQLCipher وبناء Android test host؛ لا تبدأ UI.
+1. راجع docs/POSTGRES_SCALE_BENCHMARK_2026-11-02.md وحلل اختناق دورة الترحيل المالي قبل أي ادعاء توسع.
+2. نفذ profiling للأقفال وWAL ومحفزات journal، ثم أعد اختبار 50 worker.
+3. ابدأ مراجعة SQLCipher وبناء Android test host؛ لا تبدأ UI.
