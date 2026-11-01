@@ -258,3 +258,237 @@ FOR EACH ROW EXECUTE FUNCTION ledger.reject_financial_mutation();
 CREATE TRIGGER approvals_are_immutable
 BEFORE UPDATE OR DELETE ON ledger.approvals
 FOR EACH ROW EXECUTE FUNCTION ledger.reject_financial_mutation();
+
+
+-- Financial records must originate from an approved operation of the matching type.
+CREATE OR REPLACE FUNCTION ledger.assert_approved_financial_source()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  op ledger.operations%ROWTYPE;
+  expected_type text;
+BEGIN
+  IF TG_TABLE_NAME = 'obligations' THEN
+    expected_type := 'credit_charge';
+  ELSIF TG_TABLE_NAME = 'payments' THEN
+    expected_type := 'payment';
+  ELSE
+    expected_type := 'allocation';
+  END IF;
+
+  SELECT * INTO op FROM ledger.operations
+  WHERE relationship_id = NEW.relationship_id
+    AND operation_id = NEW.source_operation_id;
+  IF NOT FOUND OR op.business_state <> 'approved' OR op.operation_type <> expected_type THEN
+    RAISE EXCEPTION 'Financial record requires an approved % operation', expected_type
+      USING ERRCODE = '23514';
+  END IF;
+
+  IF TG_TABLE_NAME = 'obligations' AND op.actor_user_id <> NEW.creditor_user_id THEN
+    RAISE EXCEPTION 'Credit charge must be created by its creditor'
+      USING ERRCODE = '42501';
+  END IF;
+  IF TG_TABLE_NAME = 'payments'
+     AND op.actor_user_id NOT IN (NEW.payer_user_id, NEW.payee_user_id) THEN
+    RAISE EXCEPTION 'Payment actor must be one of its parties'
+      USING ERRCODE = '42501';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER obligations_require_approved_source
+BEFORE INSERT ON ledger.obligations
+FOR EACH ROW EXECUTE FUNCTION ledger.assert_approved_financial_source();
+CREATE TRIGGER payments_require_approved_source
+BEFORE INSERT ON ledger.payments
+FOR EACH ROW EXECUTE FUNCTION ledger.assert_approved_financial_source();
+
+-- Direct SQL inserts cannot bypass allocation limits or party/currency checks.
+CREATE OR REPLACE FUNCTION ledger.assert_allocation_within_bounds()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  pay ledger.payments%ROWTYPE;
+  obl ledger.obligations%ROWTYPE;
+  op ledger.operations%ROWTYPE;
+  used_payment numeric;
+  used_obligation numeric;
+BEGIN
+  SELECT * INTO pay FROM ledger.payments
+  WHERE id = NEW.payment_id AND relationship_id = NEW.relationship_id
+  FOR UPDATE;
+  SELECT * INTO obl FROM ledger.obligations
+  WHERE id = NEW.obligation_id AND relationship_id = NEW.relationship_id
+  FOR UPDATE;
+  SELECT * INTO op FROM ledger.operations
+  WHERE operation_id = NEW.source_operation_id
+    AND relationship_id = NEW.relationship_id;
+
+  IF NOT FOUND OR pay.status <> 'confirmed' OR obl.status <> 'open' THEN
+    RAISE EXCEPTION 'Allocation requires a confirmed payment and open obligation'
+      USING ERRCODE = '23514';
+  END IF;
+  IF op.operation_id IS NULL OR op.business_state <> 'approved'
+     OR op.operation_type <> 'allocation'
+     OR op.actor_user_id NOT IN (pay.payer_user_id, pay.payee_user_id) THEN
+    RAISE EXCEPTION 'Allocation requires an approved allocation operation by a party'
+      USING ERRCODE = '42501';
+  END IF;
+  IF NEW.currency <> pay.currency OR pay.currency <> obl.currency
+     OR pay.payer_user_id <> obl.debtor_user_id
+     OR pay.payee_user_id <> obl.creditor_user_id THEN
+    RAISE EXCEPTION 'Allocation parties and currency must match'
+      USING ERRCODE = '23514';
+  END IF;
+
+  SELECT COALESCE(sum(amount_minor),0) INTO used_payment
+  FROM ledger.allocations WHERE payment_id = NEW.payment_id;
+  SELECT COALESCE(sum(amount_minor),0) INTO used_obligation
+  FROM ledger.allocations WHERE obligation_id = NEW.obligation_id;
+
+  IF used_payment + NEW.amount_minor > pay.amount_minor
+     OR used_obligation + NEW.amount_minor > obl.amount_minor THEN
+    RAISE EXCEPTION 'Allocation exceeds payment or obligation remainder'
+      USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER allocations_enforce_bounds
+BEFORE INSERT ON ledger.allocations
+FOR EACH ROW EXECUTE FUNCTION ledger.assert_allocation_within_bounds();
+
+-- Create accounts lazily and post each accepted financial fact into the same
+-- append-only journal. The posting triggers run in the caller's transaction.
+CREATE OR REPLACE FUNCTION ledger.get_or_create_account(
+  p_relationship_id uuid,
+  p_owner_user_id uuid,
+  p_account_type text,
+  p_currency char(3)
+) RETURNS uuid
+LANGUAGE plpgsql AS $$
+DECLARE account_id uuid;
+BEGIN
+  INSERT INTO ledger.accounts (id, relationship_id, owner_user_id, account_type, currency)
+  VALUES (gen_random_uuid(), p_relationship_id, p_owner_user_id, p_account_type, p_currency)
+  ON CONFLICT (relationship_id, owner_user_id, account_type, currency) DO NOTHING;
+
+  SELECT id INTO account_id FROM ledger.accounts
+  WHERE relationship_id = p_relationship_id
+    AND owner_user_id = p_owner_user_id
+    AND account_type = p_account_type
+    AND currency = p_currency;
+  RETURN account_id;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION ledger.post_obligation_to_journal()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE receivable_id uuid; payable_id uuid; journal_id uuid;
+BEGIN
+  receivable_id := ledger.get_or_create_account(
+    NEW.relationship_id, NEW.creditor_user_id, 'party_receivable', NEW.currency);
+  payable_id := ledger.get_or_create_account(
+    NEW.relationship_id, NEW.debtor_user_id, 'party_payable', NEW.currency);
+
+  journal_id := gen_random_uuid();
+  INSERT INTO ledger.journal_transactions
+    (id, relationship_id, source_operation_id, currency, description)
+  VALUES
+    (journal_id, NEW.relationship_id, NEW.source_operation_id, NEW.currency, 'Approved obligation');
+
+  INSERT INTO ledger.journal_entries
+    (id, journal_transaction_id, relationship_id, currency, account_id, debit_minor, credit_minor)
+  VALUES
+    (gen_random_uuid(), journal_id, NEW.relationship_id, NEW.currency, receivable_id, NEW.amount_minor, 0),
+    (gen_random_uuid(), journal_id, NEW.relationship_id, NEW.currency, payable_id, 0, NEW.amount_minor);
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION ledger.post_payment_to_journal()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE asset_id uuid; liability_id uuid; journal_id uuid;
+BEGIN
+  asset_id := ledger.get_or_create_account(
+    NEW.relationship_id, NEW.payer_user_id, 'unapplied_payment_asset', NEW.currency);
+  liability_id := ledger.get_or_create_account(
+    NEW.relationship_id, NEW.payee_user_id, 'unapplied_payment_liability', NEW.currency);
+
+  journal_id := gen_random_uuid();
+  INSERT INTO ledger.journal_transactions
+    (id, relationship_id, source_operation_id, currency, description)
+  VALUES
+    (journal_id, NEW.relationship_id, NEW.source_operation_id, NEW.currency, 'Recorded unapplied payment');
+
+  INSERT INTO ledger.journal_entries
+    (id, journal_transaction_id, relationship_id, currency, account_id, debit_minor, credit_minor)
+  VALUES
+    (gen_random_uuid(), journal_id, NEW.relationship_id, NEW.currency, asset_id, NEW.amount_minor, 0),
+    (gen_random_uuid(), journal_id, NEW.relationship_id, NEW.currency, liability_id, 0, NEW.amount_minor);
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION ledger.post_allocation_to_journal()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  pay ledger.payments%ROWTYPE;
+  obl ledger.obligations%ROWTYPE;
+  payer_payable_id uuid;
+  payer_asset_id uuid;
+  payee_receivable_id uuid;
+  payee_liability_id uuid;
+  journal_id uuid;
+BEGIN
+  SELECT * INTO pay FROM ledger.payments WHERE id = NEW.payment_id;
+  SELECT * INTO obl FROM ledger.obligations WHERE id = NEW.obligation_id;
+
+  payer_payable_id := ledger.get_or_create_account(
+    NEW.relationship_id, pay.payer_user_id, 'party_payable', NEW.currency);
+  payer_asset_id := ledger.get_or_create_account(
+    NEW.relationship_id, pay.payer_user_id, 'unapplied_payment_asset', NEW.currency);
+  payee_receivable_id := ledger.get_or_create_account(
+    NEW.relationship_id, pay.payee_user_id, 'party_receivable', NEW.currency);
+  payee_liability_id := ledger.get_or_create_account(
+    NEW.relationship_id, pay.payee_user_id, 'unapplied_payment_liability', NEW.currency);
+
+  journal_id := gen_random_uuid();
+  INSERT INTO ledger.journal_transactions
+    (id, relationship_id, source_operation_id, currency, description)
+  VALUES
+    (journal_id, NEW.relationship_id, NEW.source_operation_id, NEW.currency, 'Payment allocation');
+
+  -- Reclassify the allocated amount from unapplied credit to settled balances.
+  INSERT INTO ledger.journal_entries
+    (id, journal_transaction_id, relationship_id, currency, account_id, debit_minor, credit_minor)
+  VALUES
+    (gen_random_uuid(), journal_id, NEW.relationship_id, NEW.currency, payee_liability_id, NEW.amount_minor, 0),
+    (gen_random_uuid(), journal_id, NEW.relationship_id, NEW.currency, payee_receivable_id, 0, NEW.amount_minor),
+    (gen_random_uuid(), journal_id, NEW.relationship_id, NEW.currency, payer_payable_id, NEW.amount_minor, 0),
+    (gen_random_uuid(), journal_id, NEW.relationship_id, NEW.currency, payer_asset_id, 0, NEW.amount_minor);
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER obligations_post_to_journal
+AFTER INSERT ON ledger.obligations
+FOR EACH ROW EXECUTE FUNCTION ledger.post_obligation_to_journal();
+CREATE TRIGGER payments_post_to_journal
+AFTER INSERT ON ledger.payments
+FOR EACH ROW EXECUTE FUNCTION ledger.post_payment_to_journal();
+CREATE TRIGGER allocations_post_to_journal
+AFTER INSERT ON ledger.allocations
+FOR EACH ROW EXECUTE FUNCTION ledger.post_allocation_to_journal();
+
+-- Positive position means the member is net owed money; negative means the
+-- member owes money. Values are always grouped by relationship and currency.
+CREATE VIEW ledger.member_currency_positions AS
+SELECT
+  relationship_id,
+  owner_user_id,
+  currency,
+  sum(debit_minor - credit_minor)::numeric AS net_position_minor
+FROM ledger.journal_entries
+JOIN ledger.accounts USING (account_id, relationship_id, currency)
+GROUP BY relationship_id, owner_user_id, currency;
