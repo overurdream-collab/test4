@@ -2,143 +2,123 @@
 
 **آخر تحديث:** 2026-11-02  
 **المستودع:** https://github.com/overurdream-collab/test4  
-**الفرع الأساسي:** main
+**الفرع الأساسي:** main  
+**آخر merge على main:** 9451eb5e1096880ecef261a383bd166094158140
 
-## 1. الحالة التنفيذية المختصرة
+## 1. الخلاصة التنفيذية
 
-المشروع في مرحلة تأسيس المتطلبات والتصميم، مع نموذج PostgreSQL أولي على فرع مستقل. لا يوجد تطبيق مستخدم أو API أو نشر إنتاجي حتى الآن.
+لم نعد في مرحلة وثائق فقط. توجد الآن نواة مالية PostgreSQL، وواجهات HTTP أولية، وحزمة Flutter لطبقة التخزين المحلي والمزامنة. اجتازت الاختبارات الآلية المسارات المحددة أدناه.
 
-| المجال | الحالة | الدليل/التوضيح |
+لكن هذا **ليس تطبيقًا جاهزًا للإطلاق**:
+- لا يوجد مزود مصادقة/OTP أو token verifier إنتاجي.
+- لم يُختبر SQLCipher الأصلي أو secure storage على Android/iOS فعليًا.
+- محاكاة جهازين تستخدم قاعدتي SQLite محليتين وخادمًا وهميًا؛ لم يجر اختبار هاتفين حقيقيين مع PostgreSQL.
+- لا توجد سياسة backup/key recovery مثبتة.
+- لا توجد نتائج حمل نهائية حتى الآن؛ PR #11 قيد التشغيل.
+- لا توجد واجهات مستخدم، ولا قاعدة إنتاجية، ولا نشر.
+
+## 2. ما نُفذ وجرى دمجه
+
+| المجال | الحالة | دليل الدمج والاختبار |
 |---|---|---|
-| رؤية المنتج والقرارات الأساسية | موثقة | `docs/PROJECT_FOUNDATION.md` |
-| متطلبات PRD الأصلي | جُمعت في وثيقة عربية | `docs/PRODUCT_REQUIREMENTS_AR.md` |
-| ملف تسليم شامل | أُعد | `docs/MASTER_HANDOFF_AR.md` |
-| مواصفات ledger/sync | موثقة كمقترح هندسي | `docs/LEDGER_AND_SYNC_SPEC.md` |
-| PostgreSQL prototype | موجود على فرع | `prototype/postgres-journal-core` |
-| SQL tests | موجودة على الفرع | لم يُثبت نجاح تشغيلها |
-| PostgreSQL CI workflow | مدمج في main | `.github/workflows/ledger-db-tests.yml` |
-| تطبيق Flutter | غير منفذ | — |
-| API | غير منفذ | — |
-| مزامنة فعلية بين جهازين | غير منفذة | — |
-| لوحة الإدارة | غير منفذة | — |
-| نشر/قاعدة إنتاجية | غير موجودة | لا موافقة على موارد مدفوعة |
-| اختبارات حمل | غير منفذة | لا توجد افتراضات حمل متفق عليها |
+| دفتر قيود PostgreSQL append-only | مدمج ومختبر | PR #3، merge 2ba73f3؛ راجع PostgreSQL CI |
+| الالتزامات والمدفوعات وتخصيص الدفعات | مدمج ومختبر | PR #7، merge 66d0b9a؛ Run #26 |
+| الموافقات والصلاحيات والتكرار الآمن لقرار الموافقة | مدمج ومختبر | PR #8، merge 725f450؛ API Run #6 وPG Run #29 |
+| استقبال العمليات وموجز أحداث متسلسل لكل علاقة | مدمج ومختبر | PR #9، merge 6a61306؛ API Run #15 وPG Run #39 |
+| مخزن محلي وطابور outbox ومطبق الأحداث | مدمج كنواة برمجية | PR #10، merge 9451eb5؛ Flutter Run #21 |
+| HTTP sync transport وSyncCoordinator | مدمج ومختبر بمحاكاة | PR #10؛ Run #21 |
+| اختبار عميلين محليين | محاكاة ناجحة | قاعدتا SQLite منفصلتان + fake server؛ لا يعادل هاتفين فعليين |
+| SQLCipher native encryption | غير مثبت | يحتاج Android/iOS emulator أو جهاز فعلي |
+| المصادقة الإنتاجية وتسجيل الأجهزة | غير منفذ | يحتاج اختيار مزود/آلية آمنة |
+| backup/key recovery | غير منفذ | بوابة قبل تجربة مالية حقيقية |
+| اختبار الأداء بمليون حدث | قيد التنفيذ | PR #11 |
+| UI / admin panel | مؤجل | لن يبدأ قبل اجتياز بوابات صحة الرصيد والتزامن |
 
-## 2. GitHub
+### اختبارات PostgreSQL
 
-- Repository: `overurdream-collab/test4`
-- Visibility عند آخر تحقق: Public.
-- Default branch: `main`.
-- صلاحيات GitHub connector عند آخر تحقق: admin/push متاحة.
-- استخدم feature branches وPRs، ولا تكتب مباشرة إلى main.
+- Run #26: نموذج الالتزامات/المدفوعات/التخصيص/الموافقات، مع توازن القيود وحدود التخصيص ومنع الإدخال المباشر المخالف.
+- Run #29: تشديد idempotency لقرار الموافقة ورفض إعادة استخدام المفتاح مع سبب مختلف.
+- Run #39: migrations 001–004؛ قبول العملية، منع تكرارها بمحتوى مختلف، تسلسل الأحداث لكل علاقة، immutability، وترحيل credit charge المعتمد إلى القيد المالي في نفس المعاملة.
 
-### PRs المعروفة
-- PR #1 — Project foundation: مدمج. Merge SHA المعروف: `5a2ebdc9d1e0cf5c668a6432569ba41b4d8218b7`.
-- PR #2 — Ledger and sync specification: مدمج. راجع GitHub لاستخراج merge SHA الدقيق عند الحاجة.
-- PR #4 — Enable PostgreSQL ledger validation workflow: مدمج. Merge SHA: `0e2f1241dad4374207fc15faa7d35c02e0c573e8`.
-- PR #3 — Prototype PostgreSQL append-only ledger core: آخر حالة شوهدت مفتوح وغير مدمج، قابل للدمج. آخر head SHA معروف: `09bfdde94b0073e5176ee5c9ef5a46d79a773204`. تحقق مباشرة قبل أي إجراء.
+### اختبارات API
 
-**تحذير:** أداة جلب workflow runs لم تعرض Run ناجحًا مرتبطًا بآخر SHA للـ prototype. لا تكتب PASS ولا تدمج باعتبار الاختبارات ناجحة قبل تشغيلها فعليًا والتحقق من النتيجة.
+- Run #6: typecheck واختبارات واجهة الموافقة/الرفض.
+- Run #15: typecheck واختبارات استقبال العمليات وموجز الأحداث.
+- الـ PrincipalResolver حاليًا حقن تجريبي في الاختبارات فقط؛ لا توجد مصادقة إنتاجية.
 
-## 3. الملفات المهمة
+### اختبارات Flutter
 
-على main:
-- `README.md`
-- `docs/PROJECT_FOUNDATION.md`
-- `docs/LEDGER_AND_SYNC_SPEC.md`
-- `.github/workflows/ledger-db-tests.yml`
+- Run #21: flutter analyze وflutter test ناجحان.
+- اختبارات التخزين تستخدم SQLite FFI غير مشفر.
+- SQLCipher plugin ومفتاح secure storage لم يُختبرا على جهاز Android/iOS.
+- اختبارات العميلين تستخدم fake server ولا تتصل بقاعدة PostgreSQL.
 
-على فرع النموذج:
-- `db/migrations/001_core_ledger.sql`
-- `db/tests/001_core_ledger_test.sql`
+## 3. Pull Requests
 
-أصبحت الملفات التالية موجودة على `main` بعد دمج PR #5:
-- `docs/MASTER_HANDOFF_AR.md`
-- `docs/PRODUCT_REQUIREMENTS_AR.md`
-- `docs/PROJECT_STATUS_AND_NEXT_STEPS_AR.md`
+- PR #3 — PostgreSQL core: مدمج، SHA: 2ba73f3cfc0eb7a8ca4da857de906a81d6db9947.
+- PR #7 — obligations/payments/approvals: مدمج، SHA: 66d0b9aba50b1b69ab3fb97ce0dc648adf56ec69.
+- PR #8 — approval HTTP API: مدمج، SHA: 725f4509a5cd39c80a459dfc8bb92811ab5a721f.
+- PR #9 — operation inbox/event feed: مدمج، SHA: 6a61306122d9ddd57ad4f83b1a72a103cb50df76.
+- PR #10 — mobile offline store/sync coordinator: مدمج، SHA: 9451eb5e1096880ecef261a383bd166094158140.
+- PR #11 — million-event PostgreSQL benchmark: مفتوح؛ لا تعتمد أرقامًا حتى ينتهي التشغيل وتراجع النتائج.
 
-## 4. الخطوة التالية ذات الأولوية
+## 4. ما تبقى للوصول إلى نواة قابلة للاستخدام
 
-### P0 — إثبات PostgreSQL prototype
-1. تحقق من workflow الموجود على main.
-2. تحقق من PR #3 وفرعه.
-3. شغّل PostgreSQL 16 محليًا أو في CI.
-4. طبق migration.
-5. نفذ SQL tests.
-6. أصلح أي فشل وسجل SHA لكل إصلاح.
-7. أضف اختبارات سلبية للقيود غير المتوازنة، وتعديل/حذف القيود، وخلط العملات والعلاقات، وتكرار operation ID.
-8. لا تدمج قبل Run ناجح ومراجعة صحيحة لقواعد الدفتر.
+### P0 — إكمال اختبار الأداء
 
-### P1 — إكمال ERD والنموذج المالي
-- users / devices / relationships / members / roles.
-- business operations / approvals / disputes.
-- obligations / payments / allocations.
-- journal transactions / journal entries / accounts.
-- reversals / adjustments / audit events.
-- attachments metadata / idempotency records.
-- device outbox / sync cursor.
+1. تشغيل seed لمليون عملية ومليون حدث على PostgreSQL 16.
+2. قياس event-feed reads وoperation-intake writes عند concurrency 1/10/50.
+3. تسجيل throughput وp50/p95/p99 وEXPLAIN BUFFERS.
+4. تحليل نقاط الاختناق؛ لا نستنتج قدرة مليون مستخدم من حجم مليون سجل.
+5. توثيق بيئة الاختبار وقيود GitHub runner.
 
-يجب أن تمنع العلاقات المركبة cross-relationship references، وتُفرض حدود التخصيصات بمعاملة ذرية.
+### P1 — إثبات التشفير والاستعادة
 
-### P2 — API وعقود المعاملة
-- identity/authentication.
-- relationship membership and permissions.
-- command endpoint with idempotency.
-- approve/reject/dispute/adjust/reverse.
-- cursor-based sync.
-- audit and evidence access.
-- typed conflict/error results.
+1. مراجعة مصدر ومكتبات SQLCipher plugin؛ ناشر الحزمة على pub.dev غير موثق التحقق، لذلك لا نعتمدها إنتاجيًا دون مراجعة.
+2. بناء Android test host وتشغيله على emulator.
+3. اختبار أن قاعدة البيانات لا تفتح بالمفتاح الخطأ، وأن الملفات وWAL/SHM لا تحتوي بيانات مكشوفة.
+4. اختبار secure storage بعد إعادة تشغيل الجهاز وتحديث التطبيق.
+5. تحديد backup exclusions وkey recovery؛ لا يجوز فقد مفتاح قاعدة البيانات أو إعادة ضبطها بصمت.
 
-### P3 — تطبيق Offline-First
-- local encrypted SQLite.
-- atomic local write + outbox.
-- durable retry with same operation ID.
-- visible sync state separate from approval state.
-- conflict resolution workflow.
-- two-device acceptance tests.
+### P2 — مصادقة وأجهزة حقيقية
 
-### P4 — الإكمال التدريجي
-- attachments.
-- account statements and reports.
-- admin panel.
-- controlled pilot.
-- measured scale plan.
+1. اختيار آلية هوية/OTP بعد مقارنة أمنية وتكلفة، دون إنشاء خدمة مدفوعة قبل الموافقة.
+2. تنفيذ token verifier وdevice enrollment/revocation.
+3. ربط PrincipalResolver الحقيقي بخدمات HTTP.
+4. تشغيل PostgreSQL + API + عميلين فعليين/محاكيين.
+5. اختبار: انقطاع الشبكة، عملية محلية، إعادة تشغيل التطبيق، reconnect، duplicate retry، موافقة الطرف الآخر، تطابق الرصيد في الجهازين.
 
-## 5. أدلة القبول الأساسية
+### P3 — الإكمال المالي
 
-لا يُعلن اكتمال النواة إلا إذا أثبتت:
-- إنشاء دين دون إنترنت وحفظه بعد إعادة تشغيل التطبيق.
-- مزامنة العملية مرة واحدة رغم إعادة المحاولة.
-- وصولها للطرف الآخر كعملية معلقة.
-- الموافقة تخضع لصلاحية الطرف الصحيح.
-- الرصيد يتغير مرة واحدة فقط بعد الاعتماد.
-- الدفعة لا تسدد دينًا إلا عبر تخصيص صريح/سياسة معتمدة.
+- تحديد حقول العملية والمرفقات لكل نوع.
+- إكمال سيناريوهات return/credit note/reversal وربطها بالأصل.
+- اختبار التزامن المتزامن على نفس الدفعة/الالتزام.
+- صلاحيات تغيير الهاتف واستعادة الحساب مع وجود outbox غير متزامن.
+- اختبار backup/restore لقاعدة الخادم والعميل.
+
+### P4 — بعد اجتياز البوابات فقط
+
+- واجهات الاستخدام العربية RTL.
+- لوحة الإدارة.
+- تقارير وكشوف الحساب.
+- تجربة تشغيل محدودة ثم قياس فعلي.
+- خطة توسع مبنية على DAU/peak writes/attachments/sync bursts ونتائج الحمل، لا على هدف المليون وحده.
+
+## 5. قرارات لا تزال ثابتة
+
+- لا تصميم شاشات قبل إثبات صحة الرصيد.
+- لا حذف/تعديل صامت لقيد منشور.
 - لا خلط بين العملات.
-- العكس والتعديل لا يمحوان الأصل.
-- لا وصول بين العلاقات.
-- استعادة backup تطابق القيود والتدقيق.
-- تدفق كامل بين جهازين دون اتصال ثم بعد عودة الشبكة.
+- لا اعتماد عملية محلية على أنها وصلت للطرف الآخر قبل المزامنة.
+- لا موافقة من منشئ العملية على عمليته عندما تتطلب موافقة الطرف المقابل.
+- لا خدمات مدفوعة أو قاعدة إنتاجية أو نشر دون موافقة صريحة.
 
-## 6. سياسة التقرير اليومي / Worklog
+## 6. سياسة سجل العمل
 
-كل عمل جوهري يوثق في GitHub:
-- التاريخ.
-- الهدف.
-- الملفات المتغيرة.
-- commit SHA.
-- الاختبارات التي شغلت فعلًا وأوامرها.
-- Run URL ونتيجة الفحوصات.
-- ما فشل وكيف عولج.
-- ما بقي.
-- هل تم الدمج أم لا.
+كل تغيير جوهري يسجل في GitHub مع التاريخ، الملفات، SHA، أوامر الاختبار، Run URL، النتيجة، الفشل والإصلاح، وما بقي. لا تكتب PASS دون دليل تشغيل فعلي.
 
-لا تكتب أن اختبارًا نجح لمجرد أن ملف الاختبار موجود أو أن workflow معرف.
+## 7. أول مهمة للوكيل التالي
 
-## 7. سجل الحالة
-
-### 2026-11-02
-- مراجعة ملفات main والـ PR #3.
-- مراجعة PRD 1.1 الأصلي (44 صفحة).
-- تجميع القرارات الأحدث مع متطلبات المصدر وتحديد التعارضات.
-- إعداد وثائق التسليم العربية لتسهيل نقل المشروع إلى وكيل آخر.
-- لم يتم في هذه الخطوة تنفيذ كود أو تشغيل اختبار جديد.
+1. افحص PR #11 ونتيجة benchmark.
+2. لا تدمجه قبل تحليل الأرقام وتوثيق حدودها.
+3. بعد ذلك ابدأ مراجعة SQLCipher وبناء Android test host؛ لا تبدأ UI.
