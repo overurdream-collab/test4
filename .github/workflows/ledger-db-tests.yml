@@ -49,3 +49,12 @@ jobs:
         env:
           PGPASSWORD: ledger_test
         run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/tests/002_obligations_payments_approvals_test.sql
+
+      - name: Apply approval idempotency hardening migration
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/migrations/003_approval_idempotency_reason.sql
+      - name: Run approval idempotency payload tests
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/tests/003_approval_idempotency_reason_test.sql
