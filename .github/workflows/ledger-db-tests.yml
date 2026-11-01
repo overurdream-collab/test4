@@ -1,0 +1,42 @@
+name: Ledger PostgreSQL tests
+
+on:
+  pull_request:
+    paths:
+      - "db/**"
+      - ".github/workflows/ledger-db-tests.yml"
+  push:
+    branches:
+      - main
+      - "prototype/**"
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-ledger:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ledger_test
+          POSTGRES_PASSWORD: ledger_test
+          POSTGRES_DB: ledger_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ledger_test -d ledger_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply prototype migration
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/migrations/001_core_ledger.sql
+      - name: Run ledger invariant tests
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/tests/001_core_ledger_test.sql
