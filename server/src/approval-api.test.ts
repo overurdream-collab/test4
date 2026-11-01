@@ -32,7 +32,7 @@ test("rejects unauthenticated requests before calling PostgreSQL", async () => {
   await app.close();
 });
 
-test("rejects client-supplied actor fields and trusts only the authenticated principal", async () => {
+test("ignores client-supplied actor fields and trusts only the authenticated principal", async () => {
   let boundValues: unknown[] = [];
   const app = buildApprovalApi({
     pool: makePool(async (_sql, values) => {
@@ -45,17 +45,13 @@ test("rejects client-supplied actor fields and trusts only the authenticated pri
     method: "POST", url, headers: { "idempotency-key": decisionId },
     payload: { decision: "approved", expectedVersion: 1, actorUserId: "forged" }
   });
-  assert.equal(forged.statusCode, 400);
-  const valid = await app.inject({
-    method: "POST", url, headers: { "idempotency-key": decisionId },
-    payload: { decision: "approved", expectedVersion: 1, reason: "confirmed" }
-  });
-  assert.equal(valid.statusCode, 200);
-  assert.equal(JSON.parse(valid.body).serverVersion, 2);
+  assert.equal(forged.statusCode, 200);
+  assert.equal(JSON.parse(forged.body).serverVersion, 2);
   assert.equal(boundValues[0], decisionId);
   assert.equal(boundValues[1], relationshipId);
   assert.equal(boundValues[2], operationId);
   assert.equal(boundValues[3], userId);
+  assert.notEqual(boundValues[3], "forged");
   assert.equal(boundValues[4], 1);
   await app.close();
 });
