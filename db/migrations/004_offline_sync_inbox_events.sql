@@ -79,6 +79,9 @@ BEGIN
     RAISE EXCEPTION 'Invalid operation envelope' USING ERRCODE = '23514';
   END IF;
 
+  -- Serialize duplicate submissions of the same operation ID before checking inbox state.
+  PERFORM pg_advisory_xact_lock(hashtextextended(p_operation_id::text, 0));
+
   SELECT * INTO existing FROM ledger.operations
   WHERE operation_id = p_operation_id
   FOR UPDATE;
