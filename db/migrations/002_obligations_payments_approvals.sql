@@ -488,12 +488,12 @@ FOR EACH ROW EXECUTE FUNCTION ledger.post_allocation_to_journal();
 -- member owes money. Values are always grouped by relationship and currency.
 CREATE VIEW ledger.member_currency_positions AS
 SELECT
-  relationship_id,
-  owner_user_id,
-  currency,
-  sum(debit_minor - credit_minor)::numeric AS net_position_minor
+  journal_entries.relationship_id,
+  accounts.owner_user_id,
+  journal_entries.currency,
+  sum(journal_entries.debit_minor - journal_entries.credit_minor)::numeric AS net_position_minor
 FROM ledger.journal_entries
 JOIN ledger.accounts ON accounts.id = journal_entries.account_id
   AND accounts.relationship_id = journal_entries.relationship_id
   AND accounts.currency = journal_entries.currency
-GROUP BY relationship_id, owner_user_id, currency;
+GROUP BY journal_entries.relationship_id, accounts.owner_user_id, journal_entries.currency;
