@@ -5,19 +5,21 @@ INSERT INTO ledger.relationships (id, status)
 SELECT md5('bench-rel-' || n)::uuid, 'active'
 FROM generate_series(1, 1000) AS gs(n);
 
-INSERT INTO ledger.relationship_members (relationship_id, user_id, role_label, status)
+INSERT INTO ledger.relationship_members (relationship_id, user_id, role_label, status, can_approve)
 SELECT
   md5('bench-rel-' || n)::uuid,
   md5('bench-user-' || n || '-1')::uuid,
   'seller',
-  'active'
+  'active',
+  false
 FROM generate_series(1, 1000) AS gs(n)
 UNION ALL
 SELECT
   md5('bench-rel-' || n)::uuid,
   md5('bench-user-' || n || '-2')::uuid,
   'buyer',
-  'active'
+  'active',
+  true
 FROM generate_series(1, 1000) AS gs(n);
 
 INSERT INTO ledger.operations (
