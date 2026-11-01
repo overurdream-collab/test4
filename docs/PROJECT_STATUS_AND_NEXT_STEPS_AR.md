@@ -32,7 +32,7 @@
 | SQLCipher native encryption | غير مثبت | يحتاج Android/iOS emulator أو جهاز فعلي |
 | المصادقة الإنتاجية وتسجيل الأجهزة | غير منفذ | يحتاج اختيار مزود/آلية آمنة |
 | backup/key recovery | غير منفذ | بوابة قبل تجربة مالية حقيقية |
-| اختبار الأداء بمليون حدث | قيد التنفيذ | PR #11 |
+| اختبار الأداء بمليون حدث ودورة مالية | القياس الأولي مكتمل؛ profiling/soak test متبقي | PR #11، Run #9 |
 | UI / admin panel | مؤجل | لن يبدأ قبل اجتياز بوابات صحة الرصيد والتزامن |
 
 ### اختبارات PostgreSQL
@@ -61,7 +61,7 @@
 - PR #8 — approval HTTP API: مدمج، SHA: 725f4509a5cd39c80a459dfc8bb92811ab5a721f.
 - PR #9 — operation inbox/event feed: مدمج، SHA: 6a61306122d9ddd57ad4f83b1a72a103cb50df76.
 - PR #10 — mobile offline store/sync coordinator: مدمج، SHA: 9451eb5e1096880ecef261a383bd166094158140.
-- PR #11 — million-event PostgreSQL benchmark: مفتوح؛ لا تعتمد أرقامًا حتى ينتهي التشغيل وتراجع النتائج.
+- PR #11 — million-event + financial lifecycle benchmark: مدمج، SHA: 8750e3a5b53bbd396735f43d2cd1cc8cafdb9c32؛ Run #9 ناجح.
 
 ## 4. ما تبقى للوصول إلى نواة قابلة للاستخدام
 
