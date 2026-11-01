@@ -44,7 +44,7 @@ class HttpSyncTransport implements SyncTransport {
   }) async {
     final token = await accessTokenProvider();
     if (token.isEmpty) {
-      throw const SyncPermanentFailure('authentication_required');
+      throw const SyncAuthenticationRequired();
     }
 
     final request = await _httpClient.openUrl(method, uri);
@@ -68,8 +68,10 @@ class HttpSyncTransport implements SyncTransport {
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final error = decoded['error']?.toString() ?? 'http_${response.statusCode}';
       if (response.statusCode == 409) throw SyncConflictException(error);
-      if (response.statusCode == 401 ||
-          response.statusCode == 403 ||
+      if (response.statusCode == 401) {
+        throw const SyncAuthenticationRequired();
+      }
+      if (response.statusCode == 403 ||
           response.statusCode == 404 ||
           response.statusCode == 422) {
         throw SyncPermanentFailure(error);
