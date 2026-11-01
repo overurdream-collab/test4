@@ -11,6 +11,7 @@ class HttpSyncTransport implements SyncTransport {
     required this.baseUri,
     required this.accessTokenProvider,
     HttpClient? httpClient,
+    this.requestTimeout = const Duration(seconds: 20),
   }) : _httpClient = httpClient ?? HttpClient() {
     if (baseUri.scheme != 'https' && baseUri.scheme != 'http') {
       throw ArgumentError.value(baseUri, 'baseUri', 'Only HTTP(S) is supported');
@@ -19,6 +20,7 @@ class HttpSyncTransport implements SyncTransport {
 
   final Uri baseUri;
   final AccessTokenProvider accessTokenProvider;
+  final Duration requestTimeout;
   final HttpClient _httpClient;
 
   Uri _endpoint(
@@ -52,8 +54,11 @@ class HttpSyncTransport implements SyncTransport {
       ..accept = ContentType.json;
     if (body != null) request.write(jsonEncode(body));
 
-    final response = await request.close();
-    final responseText = await utf8.decoder.bind(response).join();
+    final response = await request.close().timeout(requestTimeout);
+    final responseText = await utf8.decoder
+        .bind(response)
+        .join()
+        .timeout(requestTimeout);
     Map<String, Object?> decoded = {};
     if (responseText.isNotEmpty) {
       final value = jsonDecode(responseText);
