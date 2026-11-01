@@ -105,6 +105,51 @@ class FakeSyncServer implements SyncTransport {
       ),
     );
   }
+
+  test('authentication expiry keeps the operation queued for re-login', () async {
+    final directory = await Directory.systemTemp.createTemp('ledger-auth-deferred-');
+    final store = await openStore(directory, 'device.db');
+    const relationship = '13000000-0000-0000-0000-000000000001';
+    const operation = '33000000-0000-0000-0000-000000000030';
+    await store.enqueueOperation(
+      operationId: operation,
+      relationshipId: relationship,
+      operationType: 'credit_charge',
+      payload: {'currency': 'YER', 'amountMinor': 50},
+      baseServerVersion: 0,
+    );
+
+    final coordinator = SyncCoordinator(
+      store: store,
+      transport: AuthRequiredTransport(),
+      retryBaseDelay: Duration.zero,
+    );
+    final result = await coordinator.syncRelationship(relationship);
+    expect(result.retryable, 1);
+    expect((await store.pendingOperations(relationshipId: relationship)), hasLength(1));
+    expect((await store.getOperation(operation))?.transportState, 'queued');
+
+    await store.close();
+    await directory.delete(recursive: true);
+  });
+
+}
+
+
+class AuthRequiredTransport implements SyncTransport {
+  @override
+  Future<SyncAcceptance> submitOperation(OfflineOperation operation) async {
+    throw const SyncAuthenticationRequired();
+  }
+
+  @override
+  Future<SyncEventPage> pullEvents({
+    required String relationshipId,
+    required int after,
+    required int limit,
+  }) async {
+    return SyncEventPage(events: const [], nextCursor: after, hasMore: false);
+  }
 }
 
 void main() {
