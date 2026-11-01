@@ -119,6 +119,58 @@ try {
       );
     });
   }
+
+  async function createApprovedOperation(rel, operationType, actor, approver, payload) {
+    const operationId = randomUUID();
+    await pool.query(
+      "SELECT * FROM ledger.accept_operation(" +
+      "$1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::text,$6::bytea,$7::jsonb,0,1,now())",
+      [operationId, rel.id, actor, rel.device, operationType, randomBytes(32), JSON.stringify(payload)]
+    );
+    await pool.query(
+      "SELECT ledger.decide_operation($1::uuid,$2::uuid,$3::uuid,$4::uuid,1,'approved','scale benchmark')",
+      [randomUUID(), rel.id, operationId, approver]
+    );
+    return operationId;
+  }
+
+  for (const concurrency of [1, 10, 50]) {
+    await measure("financial_lifecycle_journal_posting", concurrency, 5000, async (worker, index) => {
+      const rel = rels[(worker * 23 + index) % rels.length];
+      const buyer = uuidFromMd5("bench-user-" + ((worker * 23 + index) % rels.length + 1) + "-2");
+      const seller = rel.actor;
+      const amountMinor = 1000;
+
+      const chargeOperationId = await createApprovedOperation(
+        rel, "credit_charge", seller, buyer,
+        { creditorUserId: seller, debtorUserId: buyer, currency: "YER", amountMinor }
+      );
+      const obligationResult = await pool.query(
+        "SELECT id FROM ledger.obligations WHERE source_operation_id=$1::uuid",
+        [chargeOperationId]
+      );
+      if (!obligationResult.rows[0]) throw new Error("Approved charge did not create an obligation");
+
+      const paymentOperationId = await createApprovedOperation(
+        rel, "payment", buyer, seller,
+        { payerUserId: buyer, payeeUserId: seller, currency: "YER", amountMinor }
+      );
+      const paymentResult = await pool.query(
+        "SELECT id FROM ledger.payments WHERE source_operation_id=$1::uuid",
+        [paymentOperationId]
+      );
+      if (!paymentResult.rows[0]) throw new Error("Approved payment did not create a payment");
+
+      await createApprovedOperation(
+        rel, "allocation", buyer, seller,
+        {
+          paymentId: paymentResult.rows[0].id,
+          obligationId: obligationResult.rows[0].id,
+          amountMinor
+        }
+      );
+    });
+  }
 } finally {
   await pool.end();
 }
