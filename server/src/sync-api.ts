@@ -37,14 +37,14 @@ function canonicalJson(value: unknown): string {
       .map(([key, item]) => JSON.stringify(key) + ":" + canonicalJson(item));
     return "{" + entries.join(",") + "}";
   }
-  return JSON.stringify(value);
+  return JSON.stringify(value) ?? "null";
 }
 
 function databaseStatus(code: string | undefined): number {
   if (code === "42501") return 403;
   if (code === "23503") return 404;
   if (code === "23505" || code === "40001" || code === "55000") return 409;
-  if (code === "23514" || code === "22023") return 422;
+  if (code === "23514" || code === "22023" || code === "22P02") return 422;
   return 500;
 }
 
@@ -206,7 +206,7 @@ export function buildSyncApi({ pool, resolvePrincipal }: Dependencies): FastifyI
           " FROM auth LEFT JOIN LATERAL (" +
             " SELECT server_sequence,event_id,operation_id,event_type,event_payload,created_at" +
             " FROM ledger.relationship_events WHERE relationship_id=$1::uuid AND server_sequence>$3::bigint" +
-            " ORDER BY server_sequence LIMIT $4::integer" +
+            " ORDER BY server_sequence LIMIT ($4::integer + 1)" +
           ") e ON auth.authorized ORDER BY e.server_sequence NULLS LAST",
           [request.params.relationshipId, principal.userId, after, limit]
         );
@@ -215,7 +215,7 @@ export function buildSyncApi({ pool, resolvePrincipal }: Dependencies): FastifyI
           return reply.code(403).send({ error: "forbidden" });
         }
 
-        const events = result.rows
+        const fetchedEvents = result.rows
           .filter(row => row.server_sequence !== null)
           .map(row => ({
             serverSequence: Number(row.server_sequence),
@@ -225,11 +225,13 @@ export function buildSyncApi({ pool, resolvePrincipal }: Dependencies): FastifyI
             payload: row.event_payload,
             createdAt: row.created_at
           }));
+        const hasMore = fetchedEvents.length > limit;
+        const events = fetchedEvents.slice(0, limit);
         const nextCursor = events.length > 0
           ? events[events.length - 1]!.serverSequence
           : after;
 
-        return reply.code(200).send({ events, nextCursor, hasMore: events.length === limit });
+        return reply.code(200).send({ events, nextCursor, hasMore });
       } catch (error) {
         request.log.error({ err: error }, "Relationship event sync failed");
         return reply.code(500).send({ error: "internal_error" });
