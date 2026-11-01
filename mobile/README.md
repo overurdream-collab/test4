@@ -14,7 +14,7 @@ This is a Flutter package, not a user interface or complete application.
 
 ## Testing boundary
 
-The automated unit tests use sqflite_common_ffi with ordinary SQLite to test repository logic and two independent local database files. They do not prove SQLCipher native encryption or Android Keystore behavior. Those require an Android/iOS integration test on a real device or emulator.
+The automated unit tests use sqflite_common_ffi with ordinary SQLite to test repository logic, HTTP transport behavior, and two independent local database files against a fake server. They do not prove SQLCipher native encryption, Android Keystore behavior, or a full PostgreSQL-to-physical-device round trip. Those require an Android/iOS integration test on a real device or emulator.
 
 ## Dependency review before production
 
