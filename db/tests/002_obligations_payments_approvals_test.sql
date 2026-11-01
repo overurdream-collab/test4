@@ -52,6 +52,19 @@ BEGIN
   );
   IF v <> 2 THEN RAISE EXCEPTION 'Expected server version 2, got %',v; END IF;
 
+  -- Retrying the exact same decision ID returns the original result, not a second decision.
+  v := ledger.decide_operation(
+    '61000000-0000-0000-0000-000000000001',
+    '11000000-0000-0000-0000-000000000001',
+    '31000000-0000-0000-0000-000000000005',
+    '21000000-0000-0000-0000-000000000002',
+    1,'approved','Verified by counterparty'
+  );
+  IF v <> 2 OR (SELECT count(*) FROM ledger.approvals
+                WHERE operation_id='31000000-0000-0000-0000-000000000005') <> 1 THEN
+    RAISE EXCEPTION 'Approval retry was not idempotent';
+  END IF;
+
   -- Creator cannot approve own operation.
   BEGIN
     PERFORM ledger.decide_operation(
