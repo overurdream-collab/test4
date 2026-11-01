@@ -117,4 +117,37 @@ void main() {
     await subscription.cancel();
     await server.close(force: true);
   });
+
+
+  test('HTTP 401 is deferred for re-authentication, not treated as a conflict', () async {
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final subscription = server.listen((request) async {
+      request.response.statusCode = HttpStatus.unauthorized;
+      request.response.headers.contentType = ContentType.json;
+      request.response.write('{"error":"unauthorized"}');
+      await request.response.close();
+    });
+    final transport = HttpSyncTransport(
+      baseUri: Uri.parse('http://127.0.0.1:${server.port}/'),
+      accessTokenProvider: () async => 'expired-token',
+    );
+    final operation = OfflineOperation(
+      operationId: '33000000-0000-0000-0000-000000000003',
+      relationshipId: '13000000-0000-0000-0000-000000000001',
+      operationType: 'credit_charge',
+      payload: {'currency': 'YER', 'amountMinor': 100},
+      transportState: 'sending',
+      baseServerVersion: 0,
+      clientCreatedAt: DateTime.utc(2026, 11, 2),
+    );
+    await expectLater(
+      transport.submitOperation(operation),
+      throwsA(isA<SyncAuthenticationRequired>()),
+    );
+
+    transport.close();
+    await subscription.cancel();
+    await server.close(force: true);
+  });
+
 }
