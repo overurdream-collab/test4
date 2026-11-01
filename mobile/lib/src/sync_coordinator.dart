@@ -77,6 +77,7 @@ class SyncCoordinator {
     required this.transport,
     this.pageSize = 100,
     this.maxPages = 20,
+    this.retryBaseDelay = const Duration(seconds: 2),
   }) {
     if (pageSize < 1 || pageSize > 200) {
       throw ArgumentError.value(pageSize, 'pageSize');
@@ -90,6 +91,7 @@ class SyncCoordinator {
   final SyncTransport transport;
   final int pageSize;
   final int maxPages;
+  final Duration retryBaseDelay;
   final Map<String, Future<SyncSummary>> _inFlight = {};
 
   Future<SyncSummary> syncRelationship(String relationshipId) {
@@ -134,8 +136,8 @@ class SyncCoordinator {
         await store.markConflict(operation.operationId, error.message);
         conflicted++;
       } catch (error) {
-        final exponent = min(operation.attempts, 7);
-        final delaySeconds = min(300, 2 * (1 << exponent));
+        final exponent = min(operation.attempts, 7).toInt();
+        final delaySeconds = min(300, retryBaseDelay.inSeconds * (1 << exponent)).toInt();
         await store.markRetryable(
           operation.operationId,
           error: error.toString(),
