@@ -102,6 +102,9 @@ class OfflineStore {
       path,
       password: key,
       version: 1,
+      onConfigure: (database) async {
+        await database.execute('PRAGMA foreign_keys = ON');
+      },
       onCreate: _createSchema,
     );
     return OfflineStore._(database);
@@ -115,7 +118,13 @@ class OfflineStore {
   }) async {
     final database = await factory.openDatabase(
       path,
-      options: OpenDatabaseOptions(version: 1, onCreate: _createSchema),
+      options: OpenDatabaseOptions(
+        version: 1,
+        onConfigure: (database) async {
+          await database.execute('PRAGMA foreign_keys = ON');
+        },
+        onCreate: _createSchema,
+      ),
     );
     return OfflineStore._(database);
   }
