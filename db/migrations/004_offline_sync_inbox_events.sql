@@ -75,7 +75,7 @@ BEGIN
   IF p_request_hash IS NULL OR octet_length(p_request_hash) <> 32
      OR p_payload IS NULL OR jsonb_typeof(p_payload) <> 'object'
      OR p_base_version < 0 OR p_schema_version <> 1
-     OR p_operation_type NOT IN ('credit_charge', 'payment', 'allocation', 'supply', 'return') THEN
+     OR p_operation_type NOT IN ('credit_charge', 'payment', 'allocation', 'supply') THEN
     RAISE EXCEPTION 'Invalid operation envelope' USING ERRCODE = '23514';
   END IF;
 
@@ -196,3 +196,84 @@ $$;
 CREATE TRIGGER relationship_events_are_immutable
 BEFORE UPDATE OR DELETE ON ledger.relationship_events
 FOR EACH ROW EXECUTE FUNCTION ledger.reject_event_mutation();
+
+
+-- Approval is the financial commit point: materialize the approved proposal into
+-- the corresponding immutable financial record inside the same DB transaction.
+CREATE OR REPLACE FUNCTION ledger.append_operation_state_event()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  next_sequence bigint;
+  approval_row ledger.approvals%ROWTYPE;
+  payload jsonb;
+BEGIN
+  IF OLD.business_state IS NOT DISTINCT FROM NEW.business_state
+     AND OLD.server_version = NEW.server_version THEN
+    RETURN NEW;
+  END IF;
+
+  IF OLD.business_state <> 'approved' AND NEW.business_state = 'approved' THEN
+    CASE NEW.operation_type
+      WHEN 'credit_charge' THEN
+        INSERT INTO ledger.obligations (
+          id, relationship_id, source_operation_id, creditor_user_id, debtor_user_id,
+          currency, amount_minor
+        ) VALUES (
+          gen_random_uuid(), NEW.relationship_id, NEW.operation_id,
+          (NEW.operation_payload->>'creditorUserId')::uuid,
+          (NEW.operation_payload->>'debtorUserId')::uuid,
+          (NEW.operation_payload->>'currency')::char(3),
+          (NEW.operation_payload->>'amountMinor')::bigint
+        );
+      WHEN 'payment' THEN
+        INSERT INTO ledger.payments (
+          id, relationship_id, source_operation_id, payer_user_id, payee_user_id,
+          currency, amount_minor
+        ) VALUES (
+          gen_random_uuid(), NEW.relationship_id, NEW.operation_id,
+          (NEW.operation_payload->>'payerUserId')::uuid,
+          (NEW.operation_payload->>'payeeUserId')::uuid,
+          (NEW.operation_payload->>'currency')::char(3),
+          (NEW.operation_payload->>'amountMinor')::bigint
+        );
+      WHEN 'allocation' THEN
+        PERFORM ledger.allocate_payment(
+          gen_random_uuid(), NEW.relationship_id,
+          (NEW.operation_payload->>'paymentId')::uuid,
+          (NEW.operation_payload->>'obligationId')::uuid,
+          NEW.operation_id,
+          (NEW.operation_payload->>'amountMinor')::bigint
+        );
+      ELSE
+        NULL; -- Supply is recorded as a business event, not a financial posting.
+    END CASE;
+  END IF;
+
+  SELECT * INTO approval_row FROM ledger.approvals
+  WHERE relationship_id = NEW.relationship_id AND operation_id = NEW.operation_id
+  ORDER BY decided_at DESC LIMIT 1;
+
+  next_sequence := ledger.next_relationship_sequence(NEW.relationship_id);
+  payload := jsonb_build_object(
+    'operationId', NEW.operation_id,
+    'businessState', NEW.business_state,
+    'serverVersion', NEW.server_version
+  );
+  IF approval_row.id IS NOT NULL THEN
+    payload := payload || jsonb_build_object(
+      'decisionId', approval_row.id,
+      'decisionActorId', approval_row.actor_user_id,
+      'decision', approval_row.decision,
+      'reason', approval_row.reason
+    );
+  END IF;
+
+  INSERT INTO ledger.relationship_events (
+    relationship_id, server_sequence, event_id, operation_id, event_type, event_payload
+  ) VALUES (
+    NEW.relationship_id, next_sequence, gen_random_uuid(), NEW.operation_id,
+    'operation.state_changed', payload
+  );
+  RETURN NEW;
+END;
+$$;
