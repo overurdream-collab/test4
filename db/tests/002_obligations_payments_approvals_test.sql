@@ -155,7 +155,7 @@ BEGIN
   EXCEPTION WHEN check_violation THEN NULL;
   END;
 END;
-$;
+$$;
 
 
 -- Journal postings and balances must reflect charges, receipts, and allocations.
@@ -195,7 +195,7 @@ BEGIN
   EXCEPTION WHEN check_violation THEN NULL;
   END;
 END;
-$;
+$$;
 
 -- Same relationship/currency is enforced by composite foreign keys.
 DO $$
