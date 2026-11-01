@@ -112,6 +112,7 @@ LANGUAGE plpgsql
 AS $$
 DECLARE
   op ledger.operations%ROWTYPE;
+  prior_decision ledger.approvals%ROWTYPE;
   next_version bigint;
 BEGIN
   IF p_decision NOT IN ('approved', 'rejected') THEN
@@ -126,6 +127,22 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Operation not found in relationship' USING ERRCODE = '23503';
   END IF;
+
+  -- A retry with the same decision key and exact request returns the original result.
+  -- Reusing the key for different decision content is rejected.
+  SELECT * INTO prior_decision FROM ledger.approvals WHERE id = p_decision_id;
+  IF FOUND THEN
+    IF prior_decision.relationship_id = p_relationship_id
+       AND prior_decision.operation_id = p_operation_id
+       AND prior_decision.actor_user_id = p_actor_user_id
+       AND prior_decision.decision = p_decision
+       AND prior_decision.expected_server_version = p_expected_server_version THEN
+      RETURN prior_decision.resulting_server_version;
+    END IF;
+    RAISE EXCEPTION 'Idempotency key was reused with different decision content'
+      USING ERRCODE = '23505';
+  END IF;
+
   IF op.business_state <> 'awaiting_counterparty' THEN
     RAISE EXCEPTION 'Operation is not awaiting a decision' USING ERRCODE = '55000';
   END IF;
