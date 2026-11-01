@@ -83,7 +83,7 @@ export function buildSyncApi({ pool, resolvePrincipal }: Dependencies): FastifyI
           required: ["operationId", "operationType", "schemaVersion", "baseVersion", "payload", "clientCreatedAt"],
           properties: {
             operationId: { type: "string", format: "uuid" },
-            operationType: { type: "string", enum: ["credit_charge", "payment", "allocation", "supply", "return"] },
+            operationType: { type: "string", enum: ["credit_charge", "payment", "allocation", "supply"] },
             schemaVersion: { type: "integer", const: 1 },
             baseVersion: { type: "integer", minimum: 0 },
             payload: { type: "object" },
