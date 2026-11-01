@@ -23,7 +23,8 @@ async function measure(label, concurrency, durationMs, task) {
   const latencies = [];
   let count = 0;
   let errors = 0;
-  const deadline = Date.now() + durationMs;
+  const startedAt = Date.now();
+  const deadline = startedAt + durationMs;
   await Promise.all(Array.from({ length: concurrency }, async (_, worker) => {
     while (Date.now() < deadline) {
       const start = process.hrtime.bigint();
@@ -45,7 +46,8 @@ async function measure(label, concurrency, durationMs, task) {
     durationMs,
     operations: count,
     errors,
-    throughputPerSecond: Number((count / (durationMs / 1000)).toFixed(2)),
+    actualDurationMs: Date.now() - startedAt,
+    throughputPerSecond: Number((count / ((Date.now() - startedAt) / 1000)).toFixed(2)),
     latencyMs: {
       p50: percentile(latencies, 0.50),
       p95: percentile(latencies, 0.95),
@@ -99,8 +101,8 @@ try {
   }
 
   for (const concurrency of [1, 10, 50]) {
-    await measure("operation_intake_write", concurrency, 5000, async (worker) => {
-      const rel = rels[(worker * 19 + Math.floor(Math.random() * rels.length)) % rels.length];
+    await measure("operation_intake_write", concurrency, 5000, async (worker, index) => {
+      const rel = rels[(worker * 19 + index) % rels.length];
       await pool.query(
         "SELECT * FROM ledger.accept_operation(" +
         "$1::uuid,$2::uuid,$3::uuid,$4::uuid,'supply',$5::bytea,$6::jsonb,0,1,now())",
