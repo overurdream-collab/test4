@@ -3,7 +3,8 @@ name: Ledger PostgreSQL tests
 on:
   pull_request:
     paths:
-      - "db/**"
+      - "db/migrations/**"
+      - "db/tests/**"
       - ".github/workflows/ledger-db-tests.yml"
   push:
     branches:
