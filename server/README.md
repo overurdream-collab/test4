@@ -1,21 +1,28 @@
-# Approval API module
+# API modules
 
-This module implements the HTTP boundary for counterparty approve/reject decisions.
+This folder contains the first TypeScript/Fastify HTTP boundaries for the shared ledger.
 
-## Current implementation
+## Approval API
 
-- Fastify route: POST /v1/relationships/:relationshipId/operations/:operationId/decision
-- Requires Idempotency-Key (UUID), decision, expectedVersion, optional reason.
-- Requires an injected PrincipalResolver. The resolver must validate the user's bearer/session token and return a trusted userId and deviceId.
-- The user identity is never accepted from the request body.
-- The PostgreSQL function remains the authorization and concurrency authority.
-- Database error codes are mapped to safe HTTP statuses without returning SQL details.
+- POST /v1/relationships/:relationshipId/operations/:operationId/decision
+- Uses the PostgreSQL decision function for membership/permission checks, optimistic versioning, and idempotent decisions.
+
+## Offline sync API (server side)
+
+- POST /v1/relationships/:relationshipId/operations accepts a durable operation envelope.
+- GET /v1/relationships/:relationshipId/events?after={sequence}&limit={n} reads the ordered relationship event feed.
+- Actor and device identifiers come only from the trusted PrincipalResolver.
+- Request hashes are calculated server-side from a canonicalized envelope.
+- PostgreSQL assigns the per-relationship sequence and stores the operation/event atomically.
+- Approval of credit_charge, payment, and allocation materializes the financial fact and journal posting in the same transaction as the decision/event.
 
 ## Security boundary
 
-No production token verifier or identity provider is bundled. This is deliberate: the repository has not selected or configured an authentication provider. The API cannot be exposed until a real resolver is implemented and tested against the chosen identity system. Unit tests use a controlled fake resolver only.
+The module requires an injected PrincipalResolver. No production identity provider, bearer-token verifier, registration/OTP, device enrollment, or server bootstrap is bundled. Do not expose these routes until a real authentication adapter is implemented and tested.
 
-## Run locally
+The PostgreSQL functions enforce relationship membership, approval permissions, idempotency, state versions, and allocation bounds. The HTTP layer does not trust actor/device IDs from request payloads.
+
+## Run checks
 
 Requires Node.js 22 or newer.
 
@@ -23,11 +30,12 @@ Requires Node.js 22 or newer.
     npm run typecheck
     npm test
 
-The current tests validate the HTTP boundary with a fake PostgreSQL pool. PostgreSQL authorization and approval invariants are tested separately by the repository's PostgreSQL 16 workflow.
+Unit tests use a fake principal resolver and fake PostgreSQL pool. Database invariants run separately in the PostgreSQL 16 GitHub Actions workflow.
 
-## Not implemented here
+## Still not implemented
 
-- Account registration, phone OTP, sessions, token issuance, or device enrollment.
-- Operation creation endpoint and generic sync inbox/outbox endpoints.
-- Production server bootstrap, deployment, or secrets management.
-- Offline SQLite storage or mobile client.
+- Mobile client or encrypted SQLite/SQLCipher outbox.
+- Device registration/revocation and production authentication.
+- Full sync conflict UX, attachment sync, backup/restore.
+- Two-device offline/reconnect simulation or physical-device test.
+- Load/performance benchmark or deployment.
