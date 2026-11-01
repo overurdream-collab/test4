@@ -3,7 +3,7 @@
 
 INSERT INTO ledger.relationships (id, status)
 SELECT md5('bench-rel-' || n)::uuid, 'active'
-FROM generate_series(1, 1000) AS n;
+FROM generate_series(1, 1000) AS gs(n);
 
 INSERT INTO ledger.relationship_members (relationship_id, user_id, role_label, status)
 SELECT
@@ -11,14 +11,14 @@ SELECT
   md5('bench-user-' || n || '-1')::uuid,
   'seller',
   'active'
-FROM generate_series(1, 1000) AS n
+FROM generate_series(1, 1000) AS gs(n)
 UNION ALL
 SELECT
   md5('bench-rel-' || n)::uuid,
   md5('bench-user-' || n || '-2')::uuid,
   'buyer',
   'active'
-FROM generate_series(1, 1000) AS n;
+FROM generate_series(1, 1000) AS gs(n);
 
 INSERT INTO ledger.operations (
   operation_id, relationship_id, actor_user_id, operation_type, request_hash,
@@ -40,11 +40,11 @@ SELECT
   now(),
   jsonb_build_object('amountMinor', 1000 + (n % 1000), 'currency', 'YER'),
   ((n - 1) / 1000) + 1
-FROM generate_series(1, 1000000) AS n;
+FROM generate_series(1, 1000000) AS gs(n);
 
 INSERT INTO ledger.relationship_sync_counters (relationship_id, last_sequence)
 SELECT md5('bench-rel-' || n)::uuid, 1000
-FROM generate_series(1, 1000) AS n;
+FROM generate_series(1, 1000) AS gs(n);
 
 INSERT INTO ledger.relationship_events (
   relationship_id, server_sequence, event_id, operation_id, event_type, event_payload
@@ -62,7 +62,7 @@ SELECT
     'serverVersion', 1,
     'payload', jsonb_build_object('amountMinor', 1000 + (n % 1000), 'currency', 'YER')
   )
-FROM generate_series(1, 1000000) AS n;
+FROM generate_series(1, 1000000) AS gs(n);
 
 ANALYZE ledger.relationships;
 ANALYZE ledger.relationship_members;
