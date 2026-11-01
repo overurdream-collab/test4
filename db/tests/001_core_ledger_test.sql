@@ -63,7 +63,7 @@ INSERT INTO ledger.journal_entries (
    0,
    250000);
 
-COMMIT;
+SET CONSTRAINTS ALL IMMEDIATE;
 
 DO $$
 DECLARE
