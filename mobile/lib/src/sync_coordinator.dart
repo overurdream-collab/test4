@@ -55,6 +55,13 @@ class SyncPermanentFailure implements Exception {
   String toString() => message;
 }
 
+class SyncAuthenticationRequired implements Exception {
+  const SyncAuthenticationRequired();
+
+  @override
+  String toString() => 'authentication_required';
+}
+
 class SyncSummary {
   const SyncSummary({
     required this.accepted,
@@ -135,6 +142,13 @@ class SyncCoordinator {
       } on SyncPermanentFailure catch (error) {
         await store.markConflict(operation.operationId, error.message);
         conflicted++;
+      } on SyncAuthenticationRequired catch (error) {
+        // Keep the exact operation queued until the user signs in again.
+        await store.markRetryable(
+          operation.operationId,
+          error: error.toString(),
+        );
+        retryable++;
       } catch (error) {
         final exponent = min(operation.attempts, 7).toInt();
         final delaySeconds = min(300, retryBaseDelay.inSeconds * (1 << exponent)).toInt();
