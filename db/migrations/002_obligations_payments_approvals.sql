@@ -278,7 +278,10 @@ BEGIN
   SELECT * INTO op FROM ledger.operations
   WHERE relationship_id = NEW.relationship_id
     AND operation_id = NEW.source_operation_id;
-  IF NOT FOUND OR op.business_state <> 'approved' OR op.operation_type <> expected_type THEN
+  IF NOT FOUND THEN
+    RETURN NEW; -- Let the composite foreign key report an invalid relationship reference.
+  END IF;
+  IF op.business_state <> 'approved' OR op.operation_type <> expected_type THEN
     RAISE EXCEPTION 'Financial record requires an approved % operation', expected_type
       USING ERRCODE = '23514';
   END IF;
