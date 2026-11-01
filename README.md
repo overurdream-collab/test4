@@ -1,35 +1,43 @@
 # Shared Commercial Ledger
 
-A Yemen-first, offline-first platform for recording and reconciling financial obligations across commercial relationships.
+منصة يمنية أولًا لتسجيل الالتزامات والمعاملات المالية المشتركة بين الأطراف التجارية، مع دفتر تدقيق ومزامنة تعمل بعد انقطاع الإنترنت.
 
-## Current engineering status
+## الحالة التنفيذية المؤكدة — 2 نوفمبر 2026
 
-- PostgreSQL 16 append-only journal core is merged and its invariant suite passes.
-- Relationship-scoped obligations, payments, explicit allocations, approval decisions, and journal-based member positions are merged and tested.
-- An initial TypeScript/Fastify approval HTTP boundary is under review in PR #8; it requires a real authentication resolver before exposure.
-- A Flutter offline-store package and HTTP sync coordinator are under review in PR #10; FFI/fake-server tests simulate two independent clients, but SQLCipher native encryption and physical-device sync are not yet verified.
-- No production authentication adapter, backup/key recovery, performance/load benchmark, production database, or deployment exists yet.
+- نواة PostgreSQL 16 للقيود غير القابلة للمحو والالتزامات والمدفوعات والتخصيصات والموافقات مدمجة في الفرع main ومجتازة لاختبارات قاعدة البيانات.
+- واجهات HTTP الأولية لاستقبال العمليات، والموافقة/الرفض، وموجز الأحداث ذي المؤشر المستقل لكل علاقة مدمجة. لا يوجد مزود مصادقة أو token verifier إنتاجي حتى الآن.
+- حزمة Flutter لطبقة التخزين المحلي، وطابور الإرسال، ومزامنة HTTP، وإعادة تشغيل الأحداث مدمجة. اختبارات العميلين تستخدم قاعدتي SQLite منفصلتين ومحاكاة خادم؛ ليست اختبار هاتفين فعليًا.
+- مسار فتح SQLCipher ومفتاح platform secure storage موجود في الكود، لكن تشفير SQLCipher الأصلي وسلوك Android Keystore/iOS Keychain لم يُختبرا على محاكي أو جهاز حقيقي. لا تستخدم الحزمة في إصدار إنتاجي قبل مراجعة الإضافة واختبارها.
+- PR #11 مفتوح لاختبار مليون عملية ومليون حدث اصطناعي وقياس أداء القراءة والكتابة. لا توجد حتى الآن أرقام سعة موثوقة.
 
-## Product direction
+## الأدلة
 
-- One user account can participate in multiple commercial roles and relationships.
-- Each relationship has its own auditable ledger.
-- YER, SAR, and USD balances remain separate; no implicit currency conversion.
-- Financial records are append-only. Corrections use explicit reversals or adjustments.
-- Essential workflows work offline and synchronize safely when connectivity returns.
-- Synchronization status is distinct from counterparty approval status.
+- PR #3 — PostgreSQL append-only core: مدمج، Run #14.
+- PR #7 — obligations/payments/allocations/approvals: مدمج، PostgreSQL Run #26.
+- PR #8 — approval HTTP API: مدمج، API Run #6 وPostgreSQL Run #29.
+- PR #9 — operation inbox/event feed: مدمج، API Run #15 وPostgreSQL Run #39.
+- PR #10 — mobile offline store/sync coordinator: مدمج، Flutter Run #21.
+- PR #11 — PostgreSQL million-event benchmark: مفتوح؛ النتائج قيد التحقق.
 
-## Engineering approach
+راجع GitHub Actions للحصول على النتائج الكاملة، ولا تعتبر اختبارات FFI أو المحاكاة دليلًا على تشفير SQLCipher الأصلي أو عمل هاتفين فعليين.
 
-Build and validate the financial core before UI work. Use feature branches and reviewed pull requests. Do not connect a production database, deploy, or incur paid costs without explicit approval.
+## قرارات المنتج والهندسة
 
-## Documentation and handoff
+- الحساب الواحد يمكن أن يشارك بأدوار متعددة في علاقات تجارية مستقلة.
+- لكل علاقة دفتر وصلاحيات وأحداث ومؤشر مزامنة مستقل.
+- أرصدة YER وSAR وUSD منفصلة، ولا يوجد تحويل ضمني.
+- القيد المالي المنشور لا يُعدل أو يُحذف؛ التصحيح بعكس/تسوية موثقة.
+- حالة المزامنة منفصلة عن موافقة الطرف المقابل.
+- لا واجهات مستخدم قبل إثبات صحة الرصيد.
+- لا قاعدة بيانات إنتاجية أو نشر أو خدمة مدفوعة دون موافقة صريحة.
 
-1. [Complete Arabic project handoff](docs/MASTER_HANDOFF_AR.md)
-2. [Arabic product requirements and PRD reconciliation](docs/PRODUCT_REQUIREMENTS_AR.md)
-3. [Current project status and next steps](docs/PROJECT_STATUS_AND_NEXT_STEPS_AR.md)
-4. [Project foundation](docs/PROJECT_FOUNDATION.md)
-5. [Ledger and offline synchronization specification](docs/LEDGER_AND_SYNC_SPEC.md)
-6. [API and offline sync implementation contract](docs/IMPLEMENTATION_API_OFFLINE_SYNC_AR.md)
+## ملفات التسليم
 
-The handoff documents distinguish implemented code, passing tests, proposals, and unfinished work. Do not describe proposed features or unrun tests as complete.
+1. [التسليم الشامل بالعربية](docs/MASTER_HANDOFF_AR.md)
+2. [متطلبات المنتج ومصالحة PRD](docs/PRODUCT_REQUIREMENTS_AR.md)
+3. [حالة المشروع والخطوات التالية](docs/PROJECT_STATUS_AND_NEXT_STEPS_AR.md)
+4. [أساس المشروع](docs/PROJECT_FOUNDATION.md)
+5. [مواصفات دفتر القيود والمزامنة](docs/LEDGER_AND_SYNC_SPEC.md)
+6. [عقد API والمزامنة غير المتصلة](docs/IMPLEMENTATION_API_OFFLINE_SYNC_AR.md)
+
+يجب أن يميز كل تقرير بين المنفذ والمختبر والمقترح والمؤجل. لا تكتب PASS دون SHA ورابط تشغيل ناجح.
