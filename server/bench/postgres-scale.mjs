@@ -136,8 +136,9 @@ try {
 
   for (const concurrency of [1, 10, 50]) {
     await measure("financial_lifecycle_journal_posting", concurrency, 5000, async (worker, index) => {
-      const rel = rels[(worker * 23 + index) % rels.length];
-      const buyer = uuidFromMd5("bench-user-" + ((worker * 23 + index) % rels.length + 1) + "-2");
+      const relationshipIndex = (worker * 23 + index) % rels.length;
+      const rel = rels[relationshipIndex];
+      const buyer = uuidFromMd5("bench-user-" + (relationshipIndex + 1) + "-2");
       const seller = rel.actor;
       const amountMinor = 1000;
 
