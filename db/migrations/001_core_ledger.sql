@@ -96,7 +96,11 @@ DECLARE
   debit_total numeric;
   credit_total numeric;
 BEGIN
-  target_id := COALESCE(NEW.journal_transaction_id, NEW.id, OLD.journal_transaction_id, OLD.id);
+  IF TG_TABLE_NAME = 'journal_transactions' THEN
+    target_id := NEW.id;
+  ELSE
+    target_id := NEW.journal_transaction_id;
+  END IF;
 
   IF NOT EXISTS (
     SELECT 1 FROM ledger.journal_transactions WHERE id = target_id
