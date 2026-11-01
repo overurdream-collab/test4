@@ -140,8 +140,22 @@ BEGIN
     RAISE EXCEPTION 'Over-allocation of payment unexpectedly succeeded';
   EXCEPTION WHEN check_violation THEN NULL;
   END;
+
+  -- Direct table writes must not bypass the same aggregate allocation limits.
+  BEGIN
+    INSERT INTO ledger.allocations
+      (id,relationship_id,payment_id,obligation_id,source_operation_id,currency,amount_minor)
+    VALUES
+      ('71000000-0000-0000-0000-000000000004',
+       '11000000-0000-0000-0000-000000000001',
+       '51000000-0000-0000-0000-000000000001',
+       '41000000-0000-0000-0000-000000000001',
+       '31000000-0000-0000-0000-000000000008','YER',1);
+    RAISE EXCEPTION 'Direct over-allocation unexpectedly succeeded';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
 END;
-$$;
+$;
 
 
 -- Journal postings and balances must reflect charges, receipts, and allocations.
