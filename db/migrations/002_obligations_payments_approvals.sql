@@ -323,7 +323,7 @@ BEGIN
   WHERE operation_id = NEW.source_operation_id
     AND relationship_id = NEW.relationship_id;
 
-  IF NOT FOUND OR pay.status <> 'confirmed' OR obl.status <> 'open' THEN
+  IF pay.id IS NULL OR obl.id IS NULL OR pay.status <> 'confirmed' OR obl.status <> 'open' THEN
     RAISE EXCEPTION 'Allocation requires a confirmed payment and open obligation'
       USING ERRCODE = '23514';
   END IF;
@@ -490,5 +490,7 @@ SELECT
   currency,
   sum(debit_minor - credit_minor)::numeric AS net_position_minor
 FROM ledger.journal_entries
-JOIN ledger.accounts USING (account_id, relationship_id, currency)
+JOIN ledger.accounts ON accounts.id = journal_entries.account_id
+  AND accounts.relationship_id = journal_entries.relationship_id
+  AND accounts.currency = journal_entries.currency
 GROUP BY relationship_id, owner_user_id, currency;
