@@ -1,0 +1,22 @@
+name: shared_ledger_mobile_core
+description: Offline-first encrypted local ledger store package.
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: ">=3.9.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_secure_storage: 11.2.0
+  sqflite_common: 2.5.6+1
+  sqflite_sqlcipher: 3.4.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  sqflite_common_ffi: 2.3.7+1
+
+flutter:
+  uses-material-design: false

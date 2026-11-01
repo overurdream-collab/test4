@@ -7,7 +7,8 @@ A Yemen-first, offline-first platform for recording and reconciling financial ob
 - PostgreSQL 16 append-only journal core is merged and its invariant suite passes.
 - Relationship-scoped obligations, payments, explicit allocations, approval decisions, and journal-based member positions are merged and tested.
 - An initial TypeScript/Fastify approval HTTP boundary is under review in PR #8; it requires a real authentication resolver before exposure.
-- No mobile application, encrypted local outbox, complete sync API, two-device test, load benchmark, production database, or deployment exists yet.
+- A Flutter offline-store package and HTTP sync coordinator are under review in PR #10; FFI/fake-server tests simulate two independent clients, but SQLCipher native encryption and physical-device sync are not yet verified.
+- No production authentication adapter, backup/key recovery, performance/load benchmark, production database, or deployment exists yet.
 
 ## Product direction
 
