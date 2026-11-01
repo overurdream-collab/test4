@@ -11,7 +11,7 @@ SELECT
   md5('bench-user-' || n || '-1')::uuid,
   'seller',
   'active',
-  false
+  true
 FROM generate_series(1, 1000) AS gs(n)
 UNION ALL
 SELECT
