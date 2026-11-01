@@ -145,7 +145,7 @@ $$;
 
 
 -- Journal postings and balances must reflect charges, receipts, and allocations.
-DO $
+DO $$
 DECLARE seller_position numeric; buyer_position numeric; bad_count bigint;
 BEGIN
   SELECT net_position_minor INTO seller_position
