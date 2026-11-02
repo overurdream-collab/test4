@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
+import { createHash } from "node:crypto";
 import type { Pool } from "pg";
 
 export type AuthenticatedPrincipal = {
@@ -431,6 +432,163 @@ export function buildApprovalApi({
         });
       } catch (error) {
         request.log.error({ err: error }, "Account cycle lookup failed");
+        return reply.code(500).send({ error: "internal_error" });
+      }
+    }
+  );
+
+
+  app.post<{
+    Params: { relationshipId: string };
+    Body: { originalObligationId: string; currency: "YER" | "SAR" | "USD"; amountMinor: string; reason?: string; baseVersion?: number };
+  }>(
+    "/v1/relationships/:relationshipId/sales-returns",
+    {
+      schema: {
+        params: { type: "object", required: ["relationshipId"], properties: { relationshipId: { type: "string", format: "uuid" } } },
+        headers: { type: "object", required: ["idempotency-key"], properties: { "idempotency-key": { type: "string", format: "uuid" } } },
+        body: {
+          type: "object", additionalProperties: false,
+          required: ["originalObligationId", "currency", "amountMinor"],
+          properties: {
+            originalObligationId: { type: "string", format: "uuid" },
+            currency: { type: "string", enum: ["YER", "SAR", "USD"] },
+            amountMinor: { type: "string", pattern: "^[1-9][0-9]{0,17}$" },
+            reason: { type: "string", maxLength: 1000 },
+            baseVersion: { type: "integer", minimum: 0 }
+          }
+        }
+      }
+    },
+    async (request, reply) => {
+      const key = request.headers["idempotency-key"];
+      if (typeof key !== "string" || !UUID.test(key)) return reply.code(400).send({ error: "invalid_idempotency_key" });
+      const principal = request.principal;
+      if (!principal) return reply.code(401).send({ error: "unauthorized" });
+      const payload = {
+        originalObligationId: request.body.originalObligationId,
+        currency: request.body.currency,
+        amountMinor: request.body.amountMinor,
+        ...(request.body.reason ? { reason: request.body.reason } : {})
+      };
+      const hash = createHash("sha256").update(JSON.stringify(payload)).digest();
+      try {
+        const check = await pool.query<{
+          authorized: boolean; obligation_id: string | null; amount_minor: string | null;
+          returned_minor: string | null; cycle_status: string | null; source_cycle_id: string | null;
+          current_cycle_id: string | null;
+        }>(
+          "SELECT EXISTS(SELECT 1 FROM ledger.relationship_members rm WHERE rm.relationship_id=$1::uuid AND rm.user_id=$2::uuid AND rm.status='active') AS authorized," +
+          " o.id AS obligation_id,o.amount_minor::text AS amount_minor," +
+          " COALESCE((SELECT sum(sr.amount_minor) FROM ledger.sales_returns sr WHERE sr.relationship_id=o.relationship_id AND sr.original_obligation_id=o.id),0)::text AS returned_minor," +
+          " c.status AS cycle_status,source_op.cycle_id AS source_cycle_id,r.current_cycle_id" +
+          " FROM ledger.relationships r JOIN ledger.obligations o ON o.relationship_id=r.id AND o.id=$3::uuid AND o.currency=$4::char(3)" +
+          " JOIN ledger.operations source_op ON source_op.relationship_id=o.relationship_id AND source_op.operation_id=o.source_operation_id" +
+          " JOIN ledger.account_cycles c ON c.id=source_op.cycle_id AND c.relationship_id=o.relationship_id" +
+          " WHERE r.id=$1::uuid",
+          [request.params.relationshipId, principal.userId, request.body.originalObligationId, request.body.currency]
+        );
+        const row = check.rows[0];
+        if (!row) return reply.code(404).send({ error: "obligation_not_found" });
+        if (!row.authorized) return reply.code(403).send({ error: "forbidden" });
+        if (row.cycle_status !== "active" || row.source_cycle_id !== row.current_cycle_id) {
+          return reply.code(409).send({ error: "archived_cycle" });
+        }
+        if (BigInt(request.body.amountMinor) > BigInt(row.amount_minor!) - BigInt(row.returned_minor!)) {
+          return reply.code(409).send({ error: "return_exceeds_original_obligation" });
+        }
+        const accepted = await pool.query<{
+          outcome: string; canonical_operation_id: string; business_state: string;
+          server_version: string | number; server_sequence: string | number;
+        }>(
+          "SELECT * FROM ledger.accept_operation($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::text,$6::bytea,$7::jsonb,$8::bigint,$9::integer,$10::timestamptz)",
+          [key, request.params.relationshipId, principal.userId, principal.deviceId, "sales_return", hash, JSON.stringify(payload), request.body.baseVersion ?? 0, 1, new Date()]
+        );
+        const op = accepted.rows[0];
+        if (!op || op.canonical_operation_id !== key) {
+          request.log.error("Sales return inbox returned an invalid canonical operation");
+          return reply.code(500).send({ error: "internal_error" });
+        }
+        return reply.code(op.outcome === "already_processed" ? 200 : 201).send({
+          status: op.business_state, operationId: op.canonical_operation_id,
+          serverVersion: Number(op.server_version), serverSequence: Number(op.server_sequence)
+        });
+      } catch (error) {
+        const code = typeof error === "object" && error !== null && "code" in error
+          ? String((error as { code: unknown }).code) : undefined;
+        if (code === "23514") return reply.code(409).send({ error: "return_conflict" });
+        const status = statusForDatabaseError(code);
+        if (status === 500) {
+          request.log.error({ err: error }, "Sales return request failed");
+          return reply.code(500).send({ error: "internal_error" });
+        }
+        return reply.code(status).send({ error: status === 403 ? "forbidden" : status === 404 ? "not_found" : status === 409 ? "conflict" : "validation_error" });
+      }
+    }
+  );
+
+  app.get<{ Params: { relationshipId: string; cycleId: string } }>(
+    "/v1/relationships/:relationshipId/account-cycles/:cycleId/sales-returns",
+    {
+      schema: {
+        params: { type: "object", required: ["relationshipId", "cycleId"], properties: {
+          relationshipId: { type: "string", format: "uuid" }, cycleId: { type: "string", format: "uuid" }
+        } }
+      }
+    },
+    async (request, reply) => {
+      const principal = request.principal;
+      if (!principal) return reply.code(401).send({ error: "unauthorized" });
+      try {
+        const result = await pool.query<{ authorized: boolean; cycle_found: boolean; sales_returns: unknown[] }>(
+          "WITH access AS (SELECT EXISTS(SELECT 1 FROM ledger.relationship_members WHERE relationship_id=$1::uuid AND user_id=$3::uuid AND status='active') AS authorized," +
+          " EXISTS(SELECT 1 FROM ledger.account_cycles WHERE relationship_id=$1::uuid AND id=$2::uuid) AS cycle_found)" +
+          " SELECT access.authorized,access.cycle_found,COALESCE((SELECT jsonb_agg(jsonb_build_object(" +
+          " 'returnId',sr.id,'relationshipId',sr.relationship_id,'cycleId',op.cycle_id,'operationId',sr.source_operation_id," +
+          " 'originalObligationId',sr.original_obligation_id,'currency',sr.currency,'amountMinor',sr.amount_minor::text," +
+          " 'reason',sr.reason,'createdAt',sr.created_at,'operationState',op.business_state,'createdByUserId',op.actor_user_id," +
+          " 'originalAmountMinor',obl.amount_minor::text,'creditorUserId',obl.creditor_user_id,'debtorUserId',obl.debtor_user_id," +
+          " 'approval',jsonb_build_object('decision',ap.decision,'decidedByUserId',ap.actor_user_id,'decidedAt',ap.decided_at,'reason',ap.reason)" +
+          " ) ORDER BY sr.created_at,sr.id) FROM ledger.sales_returns sr" +
+          " JOIN ledger.operations op ON op.relationship_id=sr.relationship_id AND op.operation_id=sr.source_operation_id" +
+          " JOIN ledger.obligations obl ON obl.id=sr.original_obligation_id AND obl.relationship_id=sr.relationship_id" +
+          " LEFT JOIN LATERAL (SELECT a.decision,a.actor_user_id,a.decided_at,a.reason FROM ledger.approvals a WHERE a.operation_id=op.operation_id ORDER BY a.decided_at DESC LIMIT 1) ap ON true" +
+          " WHERE sr.relationship_id=$1::uuid AND op.cycle_id=$2::uuid),'[]'::jsonb) AS sales_returns FROM access",
+          [request.params.relationshipId, request.params.cycleId, principal.userId]
+        );
+        const row = result.rows[0];
+        if (!row?.authorized) return reply.code(403).send({ error: "forbidden" });
+        if (!row.cycle_found) return reply.code(404).send({ error: "cycle_not_found" });
+        return reply.code(200).send({ cycleId: request.params.cycleId, salesReturns: row.sales_returns });
+      } catch (error) {
+        request.log.error({ err: error }, "Sales return statement lookup failed");
+        return reply.code(500).send({ error: "internal_error" });
+      }
+    }
+  );
+
+  app.patch<{ Params: { relationshipId: string; returnId: string } }>(
+    "/v1/relationships/:relationshipId/sales-returns/:returnId",
+    {
+      schema: { params: { type: "object", required: ["relationshipId", "returnId"], properties: {
+        relationshipId: { type: "string", format: "uuid" }, returnId: { type: "string", format: "uuid" }
+      } }, body: { type: "object" } }
+    },
+    async (request, reply) => {
+      const principal = request.principal;
+      if (!principal) return reply.code(401).send({ error: "unauthorized" });
+      try {
+        const result = await pool.query<{ authorized: boolean; exists: boolean }>(
+          "SELECT EXISTS(SELECT 1 FROM ledger.relationship_members WHERE relationship_id=$1::uuid AND user_id=$2::uuid AND status='active') AS authorized," +
+          " EXISTS(SELECT 1 FROM ledger.sales_returns WHERE relationship_id=$1::uuid AND id=$3::uuid) AS exists",
+          [request.params.relationshipId, principal.userId, request.params.returnId]
+        );
+        const row = result.rows[0];
+        if (!row?.authorized) return reply.code(403).send({ error: "forbidden" });
+        if (!row.exists) return reply.code(404).send({ error: "return_not_found" });
+        return reply.code(409).send({ error: "published_return_is_immutable" });
+      } catch (error) {
+        request.log.error({ err: error }, "Sales return mutation guard failed");
         return reply.code(500).send({ error: "internal_error" });
       }
     }
