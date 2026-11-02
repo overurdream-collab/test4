@@ -18,11 +18,9 @@ test("OTP request stores only a digest and never returns the code", async () => 
   let storedHash: Buffer | undefined;
   let deliveredCode = "";
   const pool = makePool(async (sql: string, values: unknown[]) => {
-    if (sql.includes("count(*)") && sql.includes("phone_e164")) return { rows: [{ count: 0 }] };
-    if (sql.includes("count(*)") && sql.includes("requested_ip_hash")) return { rows: [{ count: 0 }] };
-    if (sql.includes("INSERT INTO identity.otp_challenges")) {
+    if (sql.includes("identity.create_otp_challenge")) {
       storedHash = values[1] as Buffer;
-      return { rows: [{ id: "83000000-0000-0000-0000-000000000001" }] };
+      return { rows: [{ challenge_id: "83000000-0000-0000-0000-000000000001" }] };
     }
     return { rows: [] };
   });
