@@ -196,7 +196,8 @@ test("decides a settlement reset using the authenticated counterparty and idempo
     status: "decided",
     requestId: decisionId,
     decision: "approved",
-    relationshipStatus: "closed"
+    relationshipStatus: "active",
+    cycleReset: true
   });
   assert.deepEqual(values, [
     "96000000-0000-0000-0000-000000000002",
@@ -206,6 +207,28 @@ test("decides a settlement reset using the authenticated counterparty and idempo
     "approved",
     "Settled by both parties"
   ]);
+  await app.close();
+});
+
+test("rejected white-page requests keep the relationship active without resetting the cycle", async () => {
+  const app = buildApprovalApi({
+    pool: makePool(async () => ({ rows: [{ decision: "rejected" }] })),
+    resolvePrincipal: async () => ({ userId, deviceId })
+  });
+  const response = await app.inject({
+    method: "POST",
+    url: settlementDecisionUrl,
+    headers: { "idempotency-key": "96000000-0000-0000-0000-000000000005" },
+    payload: { decision: "rejected", reason: "Keep current page" }
+  });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(JSON.parse(response.body), {
+    status: "decided",
+    requestId: decisionId,
+    decision: "rejected",
+    relationshipStatus: "active",
+    cycleReset: false
+  });
   await app.close();
 });
 
@@ -240,5 +263,116 @@ test("returns a conflict when the ledger is no longer settled at final approval"
   });
   assert.equal(response.statusCode, 409);
   assert.deepEqual(JSON.parse(response.body), { error: "settlement_not_complete" });
+  await app.close();
+});
+
+
+const accountCyclesUrl = "/v1/relationships/" + relationshipId + "/account-cycles";
+
+test("returns current and archived cycles with explicit debit-minus-credit balances", async () => {
+  const app = buildApprovalApi({
+    pool: makePool(async (_sql, values) => {
+      assert.deepEqual(values, [relationshipId, userId]);
+      return {
+        rows: [{
+          authorized: true,
+          current_cycle_id: "18000000-0000-0000-0000-000000000002",
+          cycles: [
+            {
+              cycleId: "18000000-0000-0000-0000-000000000002",
+              cycleNumber: 2,
+              title: "صفحة بيضاء 2",
+              status: "active",
+              startedAt: "2026-11-02T10:00:00.000Z",
+              endedAt: null,
+              balances: []
+            },
+            {
+              cycleId: "18000000-0000-0000-0000-000000000001",
+              cycleNumber: 1,
+              title: "الدورة الأولى",
+              status: "archived",
+              startedAt: "2026-10-01T10:00:00.000Z",
+              endedAt: "2026-11-02T10:00:00.000Z",
+              balances: [{
+                ownerUserId: userId,
+                currency: "YER",
+                debitMinusCreditMinor: "12500"
+              }]
+            }
+          ]
+        }]
+      };
+    }),
+    resolvePrincipal: async () => ({ userId, deviceId })
+  });
+  const response = await app.inject({ method: "GET", url: accountCyclesUrl });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(JSON.parse(response.body), {
+    currentCycleId: "18000000-0000-0000-0000-000000000002",
+    balanceSemantics: "debit_minus_credit_minor",
+    cycles: [
+      {
+        cycleId: "18000000-0000-0000-0000-000000000002",
+        cycleNumber: 2,
+        title: "صفحة بيضاء 2",
+        status: "active",
+        startedAt: "2026-11-02T10:00:00.000Z",
+        endedAt: null,
+        balances: []
+      },
+      {
+        cycleId: "18000000-0000-0000-0000-000000000001",
+        cycleNumber: 1,
+        title: "الدورة الأولى",
+        status: "archived",
+        startedAt: "2026-10-01T10:00:00.000Z",
+        endedAt: "2026-11-02T10:00:00.000Z",
+        balances: [{
+          ownerUserId: userId,
+          currency: "YER",
+          debitMinusCreditMinor: "12500"
+        }]
+      }
+    ]
+  });
+  await app.close();
+});
+
+test("denies account-cycle history to a user outside the relationship", async () => {
+  const app = buildApprovalApi({
+    pool: makePool(async () => ({
+      rows: [{ authorized: false, current_cycle_id: "18000000-0000-0000-0000-000000000002", cycles: [] }]
+    })),
+    resolvePrincipal: async () => ({ userId, deviceId })
+  });
+  const response = await app.inject({ method: "GET", url: accountCyclesUrl });
+  assert.equal(response.statusCode, 403);
+  assert.deepEqual(JSON.parse(response.body), { error: "forbidden" });
+  await app.close();
+});
+
+test("rejects unauthenticated account-cycle history before querying PostgreSQL", async () => {
+  let called = false;
+  const app = buildApprovalApi({
+    pool: makePool(async () => {
+      called = true;
+      return { rows: [] };
+    }),
+    resolvePrincipal: async () => null
+  });
+  const response = await app.inject({ method: "GET", url: accountCyclesUrl });
+  assert.equal(response.statusCode, 401);
+  assert.equal(called, false);
+  await app.close();
+});
+
+test("returns 404 when the relationship does not exist", async () => {
+  const app = buildApprovalApi({
+    pool: makePool(async () => ({ rows: [] })),
+    resolvePrincipal: async () => ({ userId, deviceId })
+  });
+  const response = await app.inject({ method: "GET", url: accountCyclesUrl });
+  assert.equal(response.statusCode, 404);
   await app.close();
 });

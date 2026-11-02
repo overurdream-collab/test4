@@ -316,7 +316,8 @@ export function buildApprovalApi({
           status: "decided",
           requestId: request.params.requestId,
           decision,
-          relationshipStatus: decision === "approved" ? "closed" : "active"
+          relationshipStatus: "active",
+          cycleReset: decision === "approved"
         });
       } catch (error) {
         const code =
@@ -334,6 +335,85 @@ export function buildApprovalApi({
         const errorCode = status === 403 ? "forbidden" : status === 404 ? "not_found" :
           status === 409 ? "conflict" : "validation_error";
         return reply.code(status).send({ error: errorCode });
+      }
+    }
+  );
+
+  // Relationship members can inspect the current and archived account cycles.
+  // Balances are reported per owner and currency using debit-minus-credit
+  // minor units; the API deliberately does not label this as "owed"/"owing".
+  app.get<{ Params: { relationshipId: string } }>(
+    "/v1/relationships/:relationshipId/account-cycles",
+    {
+      schema: {
+        params: {
+          type: "object",
+          required: ["relationshipId"],
+          properties: { relationshipId: { type: "string", format: "uuid" } }
+        }
+      }
+    },
+    async (request, reply) => {
+      const principal = request.principal;
+      if (!principal) return reply.code(401).send({ error: "unauthorized" });
+
+      try {
+        const result = await pool.query<{
+          authorized: boolean;
+          current_cycle_id: string;
+          cycles: Array<{
+            cycleId: string;
+            cycleNumber: number;
+            title: string;
+            status: "active" | "archived";
+            startedAt: string;
+            endedAt: string | null;
+            balances: Array<{
+              ownerUserId: string;
+              currency: string;
+              debitMinusCreditMinor: string;
+            }>;
+          }>;
+        }>(
+          "WITH access AS (" +
+            " SELECT r.id, r.current_cycle_id," +
+            " EXISTS (SELECT 1 FROM ledger.relationship_members rm" +
+            " WHERE rm.relationship_id=r.id AND rm.user_id=$2::uuid AND rm.status='active') AS authorized" +
+            " FROM ledger.relationships r WHERE r.id=$1::uuid" +
+          "), cycle_rows AS (" +
+            " SELECT c.id, c.relationship_id, c.cycle_number, c.title, c.status," +
+            " c.started_at, c.ended_at," +
+            " COALESCE((SELECT jsonb_agg(jsonb_build_object(" +
+              " 'ownerUserId', p.owner_user_id," +
+              " 'currency', p.currency," +
+              " 'debitMinusCreditMinor', p.net_position_minor::text" +
+            " ) ORDER BY p.owner_user_id, p.currency)" +
+            " FROM ledger.member_currency_positions p" +
+            " WHERE p.relationship_id=c.relationship_id AND p.cycle_id=c.id), '[]'::jsonb) AS balances" +
+            " FROM ledger.account_cycles c WHERE c.relationship_id=$1::uuid" +
+          ") SELECT a.authorized, a.current_cycle_id," +
+            " COALESCE(jsonb_agg(jsonb_build_object(" +
+              " 'cycleId', c.id, 'cycleNumber', c.cycle_number, 'title', c.title," +
+              " 'status', c.status, 'startedAt', c.started_at, 'endedAt', c.ended_at," +
+              " 'balances', c.balances" +
+            " ) ORDER BY c.cycle_number DESC) FILTER (WHERE c.id IS NOT NULL), '[]'::jsonb) AS cycles" +
+          " FROM access a LEFT JOIN cycle_rows c ON true" +
+          " GROUP BY a.authorized, a.current_cycle_id",
+          [request.params.relationshipId, principal.userId]
+        );
+
+        const row = result.rows[0];
+        if (!row) return reply.code(404).send({ error: "not_found" });
+        if (!row.authorized) return reply.code(403).send({ error: "forbidden" });
+
+        return reply.code(200).send({
+          currentCycleId: row.current_cycle_id,
+          balanceSemantics: "debit_minus_credit_minor",
+          cycles: row.cycles
+        });
+      } catch (error) {
+        request.log.error({ err: error }, "Account cycle lookup failed");
+        return reply.code(500).send({ error: "internal_error" });
       }
     }
   );
