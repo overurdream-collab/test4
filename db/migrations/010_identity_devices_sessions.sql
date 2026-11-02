@@ -85,6 +85,102 @@ CREATE INDEX identity_otp_ip_window_idx
   ON identity.otp_challenges(requested_ip_hash,created_at DESC)
   WHERE requested_ip_hash IS NOT NULL;
 
+-- Reserve OTP challenges atomically under phone/IP advisory locks to prevent
+-- concurrent requests from bypassing the rolling-window rate limits.
+CREATE OR REPLACE FUNCTION identity.create_otp_challenge(
+  p_phone_e164 text,p_code_hash bytea,p_ip_hash bytea,p_expires_at timestamptz
+) RETURNS uuid LANGUAGE plpgsql AS $
+DECLARE phone_requests bigint; ip_requests bigint; challenge_id uuid;
+BEGIN
+  IF p_phone_e164 IS NULL OR p_phone_e164 !~ '^\+[1-9][0-9]{7,14}
+CREATE OR REPLACE FUNCTION identity.get_or_create_user_by_phone(p_phone_e164 text)
+RETURNS uuid LANGUAGE plpgsql AS $$
+DECLARE target_user uuid; target_status text;
+BEGIN
+  IF p_phone_e164 IS NULL OR p_phone_e164 !~ '^\+[1-9][0-9]{7,14}$' THEN
+    RAISE EXCEPTION 'Invalid E.164 phone' USING ERRCODE='22023';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtextextended(p_phone_e164,0));
+  SELECT pi.user_id,u.status INTO target_user,target_status
+  FROM identity.phone_identities pi
+  JOIN identity.users u ON u.id=pi.user_id
+  WHERE pi.phone_e164=p_phone_e164
+  FOR UPDATE OF pi,u;
+  IF FOUND THEN
+    IF target_status<>'active' THEN
+      RAISE EXCEPTION 'User is suspended' USING ERRCODE='42501';
+    END IF;
+    UPDATE identity.phone_identities SET verified_at=clock_timestamp()
+    WHERE phone_e164=p_phone_e164;
+    RETURN target_user;
+  END IF;
+  INSERT INTO identity.users DEFAULT VALUES RETURNING id INTO target_user;
+  INSERT INTO identity.phone_identities(user_id,phone_e164,verified_at)
+  VALUES(target_user,p_phone_e164,clock_timestamp());
+  INSERT INTO identity.user_profiles(user_id) VALUES(target_user);
+  RETURN target_user;
+END;
+$$;
+
+-- Consume only the newest live challenge. Failed guesses count and lock at five.
+-- The application supplies an HMAC-SHA256 digest; the OTP itself is never stored.
+CREATE OR REPLACE FUNCTION identity.consume_otp_challenge(
+  p_phone_e164 text,p_code_hash bytea,p_now timestamptz DEFAULT clock_timestamp()
+) RETURNS boolean LANGUAGE plpgsql AS $$
+DECLARE challenge identity.otp_challenges%ROWTYPE;
+BEGIN
+  IF p_code_hash IS NULL OR octet_length(p_code_hash)<>32 THEN
+    RETURN false;
+  END IF;
+  SELECT * INTO challenge
+  FROM identity.otp_challenges
+  WHERE phone_e164=p_phone_e164 AND purpose='login'
+    AND status='delivered' AND consumed_at IS NULL
+  ORDER BY created_at DESC
+  LIMIT 1 FOR UPDATE;
+  IF NOT FOUND THEN RETURN false; END IF;
+  IF challenge.expires_at<=p_now THEN
+    UPDATE identity.otp_challenges SET status='expired' WHERE id=challenge.id;
+    RETURN false;
+  END IF;
+  IF challenge.attempts>=5 THEN
+    UPDATE identity.otp_challenges SET status='locked' WHERE id=challenge.id;
+    RETURN false;
+  END IF;
+  IF challenge.code_hash=p_code_hash THEN
+    UPDATE identity.otp_challenges
+    SET status='consumed',consumed_at=p_now,attempts=attempts+1
+    WHERE id=challenge.id;
+    RETURN true;
+  END IF;
+  UPDATE identity.otp_challenges
+  SET attempts=attempts+1,
+      status=CASE WHEN attempts+1>=5 THEN 'locked' ELSE status END
+  WHERE id=challenge.id;
+  RETURN false;
+END;
+$$;
+
+     OR p_code_hash IS NULL OR octet_length(p_code_hash)<>32
+     OR p_ip_hash IS NULL OR octet_length(p_ip_hash)<>32
+     OR p_expires_at<=clock_timestamp()
+     OR p_expires_at>clock_timestamp()+interval '6 minutes' THEN
+    RAISE EXCEPTION 'Invalid OTP challenge request' USING ERRCODE='22023';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtextextended('otp-phone:'||p_phone_e164,0));
+  PERFORM pg_advisory_xact_lock(hashtextextended('otp-ip:'||encode(p_ip_hash,'hex'),0));
+  SELECT count(*) INTO phone_requests FROM identity.otp_challenges
+  WHERE phone_e164=p_phone_e164 AND created_at>clock_timestamp()-interval '15 minutes';
+  SELECT count(*) INTO ip_requests FROM identity.otp_challenges
+  WHERE requested_ip_hash=p_ip_hash AND created_at>clock_timestamp()-interval '1 hour';
+  IF phone_requests>=3 OR ip_requests>=10 THEN RETURN NULL; END IF;
+  INSERT INTO identity.otp_challenges(phone_e164,code_hash,requested_ip_hash,status,expires_at)
+  VALUES(p_phone_e164,p_code_hash,p_ip_hash,'pending',p_expires_at)
+  RETURNING id INTO challenge_id;
+  RETURN challenge_id;
+END;
+$;
+
 -- Serialize registration for the same verified phone; one phone maps to one account.
 CREATE OR REPLACE FUNCTION identity.get_or_create_user_by_phone(p_phone_e164 text)
 RETURNS uuid LANGUAGE plpgsql AS $$
