@@ -58,6 +58,21 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'Matching operation-created event is missing';
   END IF;
+
+  -- Migration 012 must preserve the sales_return operation type added by migration 009.
+  SELECT * INTO accepted FROM ledger.accept_operation(
+    '33000000-0000-0000-0000-000000000102',
+    '13000000-0000-0000-0000-000000000103',
+    '23000000-0000-0000-0000-000000000101',
+    '73000000-0000-0000-0000-000000000101',
+    'sales_return',
+    decode(repeat('cd',32),'hex'),
+    '{"originalObligationId":"43000000-0000-0000-0000-000000000101","currency":"YER","amountMinor":"500","reason":"soak regression guard"}'::jsonb,
+    0,1,now()
+  );
+  IF accepted.outcome <> 'accepted' OR accepted.server_sequence <> 2 THEN
+    RAISE EXCEPTION 'sales_return operation was not preserved by sequence optimization: %',row_to_json(accepted);
+  END IF;
 END;
 $$;
 

@@ -57,7 +57,7 @@ BEGIN
   IF p_request_hash IS NULL OR octet_length(p_request_hash) <> 32
      OR p_payload IS NULL OR jsonb_typeof(p_payload) <> 'object'
      OR p_base_version < 0 OR p_schema_version <> 1
-     OR p_operation_type NOT IN ('credit_charge', 'payment', 'allocation', 'supply') THEN
+     OR p_operation_type NOT IN ('credit_charge', 'payment', 'allocation', 'supply', 'sales_return') THEN
     RAISE EXCEPTION 'Invalid operation envelope' USING ERRCODE = '23514';
   END IF;
 
