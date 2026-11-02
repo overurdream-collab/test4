@@ -450,3 +450,180 @@ test("account cycle API preserves signed negative receivable and payable values"
   assert.equal(balances[1].partyBalanceMinor, "5000");
   await app.close();
 });
+
+
+const returnKey = "81000000-0000-0000-0000-000000000001";
+const obligationId = "82000000-0000-0000-0000-000000000001";
+const cycleId = "83000000-0000-0000-0000-000000000001";
+const returnUrl = "/v1/relationships/" + relationshipId + "/sales-returns";
+const returnPayload = { originalObligationId: obligationId, currency: "YER", amountMinor: "2500", reason: "Returned goods" };
+
+test("creates an idempotent sales-return operation using principal identity only", async () => {
+  const calls: Array<{ sql: string; values: unknown[] }> = [];
+  const app = buildApprovalApi({
+    pool: makePool(async (sql, values) => {
+      calls.push({ sql: String(sql), values: values ?? [] });
+      if (calls.length === 1) return { rows: [{
+        authorized: true, obligation_id: obligationId, amount_minor: "10000",
+        returned_minor: "1000", cycle_status: "active", source_cycle_id: cycleId, current_cycle_id: cycleId
+      }] };
+      return { rows: [{
+        outcome: "accepted", canonical_operation_id: returnKey, business_state: "awaiting_counterparty",
+        server_version: 1, server_sequence: 44
+      }] };
+    }),
+    resolvePrincipal: async () => ({ userId, deviceId })
+  });
+  const response = await app.inject({
+    method: "POST", url: returnUrl, headers: { "idempotency-key": returnKey },
+    payload: { ...returnPayload, actorUserId: "forged-user" }
+  });
+  assert.equal(response.statusCode, 201);
+  assert.deepEqual(JSON.parse(response.body), {
+    status: "awaiting_counterparty", operationId: returnKey, serverVersion: 1, serverSequence: 44
+  });
+  assert.deepEqual(calls[1].values.slice(0, 5), [returnKey, relationshipId, userId, deviceId, "sales_return"]);
+  assert.equal(calls[1].values[7], JSON.stringify(returnPayload));
+  await app.close();
+});
+
+test("replays the same sales-return idempotency key without creating another operation", async () => {
+  let acceptCalls = 0;
+  const app = buildApprovalApi({
+    pool: makePool(async (sql) => {
+      if (String(sql).includes("ledger.accept_operation")) {
+        acceptCalls++;
+        return { rows: [{
+          outcome: "already_processed", canonical_operation_id: returnKey, business_state: "awaiting_counterparty",
+          server_version: 1, server_sequence: 44
+        }] };
+      }
+      return { rows: [{
+        authorized: true, obligation_id: obligationId, amount_minor: "10000", returned_minor: "1000",
+        cycle_status: "active", source_cycle_id: cycleId, current_cycle_id: cycleId
+      }] };
+    }),
+    resolvePrincipal: async () => ({ userId, deviceId })
+  });
+  const response = await app.inject({ method: "POST", url: returnUrl, headers: { "idempotency-key": returnKey }, payload: returnPayload });
+  assert.equal(response.statusCode, 200);
+  assert.equal(acceptCalls, 1);
+  await app.close();
+});
+
+test("rejects a sales return that exceeds the original obligation with HTTP 409", async () => {
+  const app = buildApprovalApi({
+    pool: makePool(async () => ({ rows: [{
+      authorized: true, obligation_id: obligationId, amount_minor: "10000", returned_minor: "9000",
+      cycle_status: "active", source_cycle_id: cycleId, current_cycle_id: cycleId
+    }] })),
+    resolvePrincipal: async () => ({ userId, deviceId })
+  });
+  const response = await app.inject({ method: "POST", url: returnUrl, headers: { "idempotency-key": returnKey }, payload: returnPayload });
+  assert.equal(response.statusCode, 409);
+  assert.deepEqual(JSON.parse(response.body), { error: "return_exceeds_original_obligation" });
+  await app.close();
+});
+
+test("rejects a sales return against an archived source cycle with HTTP 409", async () => {
+  const app = buildApprovalApi({
+    pool: makePool(async () => ({ rows: [{
+      authorized: true, obligation_id: obligationId, amount_minor: "10000", returned_minor: "0",
+      cycle_status: "archived", source_cycle_id: cycleId, current_cycle_id: "83000000-0000-0000-0000-000000000002"
+    }] })),
+    resolvePrincipal: async () => ({ userId, deviceId })
+  });
+  const response = await app.inject({ method: "POST", url: returnUrl, headers: { "idempotency-key": returnKey }, payload: returnPayload });
+  assert.equal(response.statusCode, 409);
+  assert.deepEqual(JSON.parse(response.body), { error: "archived_cycle" });
+  await app.close();
+});
+
+test("sales-return request requires a valid idempotency key", async () => {
+  const app = buildApprovalApi({
+    pool: makePool(async () => { throw new Error("must not query"); }),
+    resolvePrincipal: async () => ({ userId, deviceId })
+  });
+  const response = await app.inject({ method: "POST", url: returnUrl, payload: returnPayload });
+  assert.equal(response.statusCode, 400);
+  await app.close();
+});
+
+test("returns detailed sales-return rows scoped to relationship and account cycle", async () => {
+  const app = buildApprovalApi({
+    pool: makePool(async (_sql, values) => {
+      assert.deepEqual(values, [relationshipId, cycleId, userId]);
+      return { rows: [{
+        authorized: true, cycle_found: true,
+        sales_returns: [{
+          returnId: returnKey, relationshipId, cycleId, operationId: returnKey,
+          originalObligationId: obligationId, currency: "YER", amountMinor: "2500",
+          reason: "Returned goods", operationState: "approved", createdByUserId: userId,
+          originalAmountMinor: "10000", creditorUserId: userId,
+          debtorUserId: "21000000-0000-0000-0000-000000000003",
+          approval: { decision: "approved", decidedByUserId: "21000000-0000-0000-0000-000000000003" }
+        }]
+      }] };
+    }),
+    resolvePrincipal: async () => ({ userId, deviceId })
+  });
+  const response = await app.inject({ method: "GET", url: "/v1/relationships/" + relationshipId + "/account-cycles/" + cycleId + "/sales-returns" });
+  assert.equal(response.statusCode, 200);
+  const body = JSON.parse(response.body);
+  assert.equal(body.salesReturns[0].amountMinor, "2500");
+  assert.equal(body.salesReturns[0].approval.decision, "approved");
+  await app.close();
+});
+
+test("denies detailed sales-return statement access to non-members", async () => {
+  const app = buildApprovalApi({
+    pool: makePool(async () => ({ rows: [{ authorized: false, cycle_found: true, sales_returns: [] }] })),
+    resolvePrincipal: async () => ({ userId, deviceId })
+  });
+  const response = await app.inject({ method: "GET", url: "/v1/relationships/" + relationshipId + "/account-cycles/" + cycleId + "/sales-returns" });
+  assert.equal(response.statusCode, 403);
+  await app.close();
+});
+
+test("rejects edits to a published sales return as immutable", async () => {
+  const app = buildApprovalApi({
+    pool: makePool(async () => ({ rows: [{ authorized: true, exists: true }] })),
+    resolvePrincipal: async () => ({ userId, deviceId })
+  });
+  const response = await app.inject({
+    method: "PATCH", url: returnUrl + "/" + returnKey, payload: { amountMinor: "1" }
+  });
+  assert.equal(response.statusCode, 409);
+  assert.deepEqual(JSON.parse(response.body), { error: "published_return_is_immutable" });
+  await app.close();
+});
+
+test("counterparty approval reuses the operation decision API and maps self-approval to 403", async () => {
+  const app = buildApprovalApi({
+    pool: makePool(async () => { throw Object.assign(new Error("creator cannot approve"), { code: "42501" }); }),
+    resolvePrincipal: async () => ({ userId, deviceId })
+  });
+  const response = await app.inject({
+    method: "POST",
+    url: "/v1/relationships/" + relationshipId + "/operations/" + returnKey + "/decision",
+    headers: { "idempotency-key": decisionId },
+    payload: { decision: "approved", expectedVersion: 1 }
+  });
+  assert.equal(response.statusCode, 403);
+  await app.close();
+});
+
+test("counterparty approval maps a return-overrun race to HTTP 409", async () => {
+  const app = buildApprovalApi({
+    pool: makePool(async () => { throw Object.assign(new Error("cumulative return cap"), { code: "23514" }); }),
+    resolvePrincipal: async () => ({ userId, deviceId })
+  });
+  const response = await app.inject({
+    method: "POST",
+    url: "/v1/relationships/" + relationshipId + "/operations/" + returnKey + "/decision",
+    headers: { "idempotency-key": decisionId },
+    payload: { decision: "approved", expectedVersion: 1 }
+  });
+  assert.equal(response.statusCode, 409);
+  await app.close();
+});
