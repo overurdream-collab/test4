@@ -172,6 +172,7 @@ export function buildSyncApi({ pool, resolvePrincipal }: Dependencies): FastifyI
           type: "object", additionalProperties: false,
           properties: {
             after: { type: "string", pattern: "^[0-9]+$" },
+            cursors: { type: "string", maxLength: 2048 },
             limit: { type: "string", pattern: "^[0-9]+$" }
           }
         }
