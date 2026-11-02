@@ -113,12 +113,12 @@ class HttpSyncTransport implements SyncTransport {
   @override
   Future<SyncEventPage> pullEvents({
     required String relationshipId,
-    required int after,
+    required Map<int,int> cursors,
     required int limit,
   }) async {
     final uri = _endpoint(
       ['v1', 'relationships', relationshipId, 'events'],
-      queryParameters: {'after': '$after', 'limit': '$limit'},
+      queryParameters: {'cursors': jsonEncode({for (final entry in cursors.entries) '${entry.key}': entry.value}), 'limit': '$limit'},
     );
     final response = await _requestJson(method: 'GET', uri: uri);
     final rawEvents = response['events'] as List? ?? const [];
@@ -127,6 +127,7 @@ class HttpSyncTransport implements SyncTransport {
       return SyncEvent(
         relationshipId: relationshipId,
         serverSequence: (event['serverSequence']! as num).toInt(),
+        syncShard: (event['syncShard']! as num).toInt(),
         eventId: event['eventId']! as String,
         operationId: event['operationId']! as String,
         eventType: event['eventType']! as String,
@@ -137,7 +138,7 @@ class HttpSyncTransport implements SyncTransport {
 
     return SyncEventPage(
       events: events,
-      nextCursor: (response['nextCursor']! as num).toInt(),
+      nextCursor: (response['nextCursor']! as Map).map((key,value) => MapEntry(int.parse(key.toString()), (value as num).toInt())),
       hasMore: response['hasMore']! as bool,
     );
   }
