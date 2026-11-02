@@ -46,7 +46,7 @@ jobs:
         env:
           PGPASSWORD: ledger_test
         run: |
-          for migration in db/migrations/001_core_ledger.sql db/migrations/002_obligations_payments_approvals.sql db/migrations/003_approval_idempotency_reason.sql db/migrations/004_offline_sync_inbox_events.sql; do
+          for migration in db/migrations/001_core_ledger.sql db/migrations/002_obligations_payments_approvals.sql db/migrations/003_approval_idempotency_reason.sql db/migrations/004_offline_sync_inbox_events.sql db/migrations/005_settlement_reset_gate.sql; do
             psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f "$migration"
           done
       - name: Seed one million operations and events
