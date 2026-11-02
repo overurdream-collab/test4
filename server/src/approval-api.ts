@@ -371,7 +371,10 @@ export function buildApprovalApi({
             balances: Array<{
               ownerUserId: string;
               currency: string;
-              debitMinusCreditMinor: string;
+              receivableMinor: string;
+              payableMinor: string;
+              unappliedPaymentAssetMinor: string;
+              unappliedPaymentLiabilityMinor: string;
             }>;
           }>;
         }>(
@@ -384,12 +387,25 @@ export function buildApprovalApi({
             " SELECT c.id, c.relationship_id, c.cycle_number, c.title, c.status," +
             " c.started_at, c.ended_at," +
             " COALESCE((SELECT jsonb_agg(jsonb_build_object(" +
-              " 'ownerUserId', p.owner_user_id," +
-              " 'currency', p.currency," +
-              " 'debitMinusCreditMinor', p.net_position_minor::text" +
-            " ) ORDER BY p.owner_user_id, p.currency)" +
-            " FROM ledger.member_currency_positions p" +
-            " WHERE p.relationship_id=c.relationship_id AND p.cycle_id=c.id), '[]'::jsonb) AS balances" +
+              " 'ownerUserId', b.owner_user_id," +
+              " 'currency', b.currency," +
+              " 'receivableMinor', b.receivable_minor::text," +
+              " 'payableMinor', b.payable_minor::text," +
+              " 'unappliedPaymentAssetMinor', b.unapplied_payment_asset_minor::text," +
+              " 'unappliedPaymentLiabilityMinor', b.unapplied_payment_liability_minor::text" +
+            " ) ORDER BY b.owner_user_id, b.currency)" +
+            " FROM (" +
+              " SELECT a.owner_user_id, a.currency," +
+              " COALESCE(sum(CASE WHEN a.account_type='party_receivable' THEN je.debit_minor-je.credit_minor ELSE 0 END),0) AS receivable_minor," +
+              " COALESCE(sum(CASE WHEN a.account_type='party_payable' THEN je.credit_minor-je.debit_minor ELSE 0 END),0) AS payable_minor," +
+              " COALESCE(sum(CASE WHEN a.account_type='unapplied_payment_asset' THEN je.debit_minor-je.credit_minor ELSE 0 END),0) AS unapplied_payment_asset_minor," +
+              " COALESCE(sum(CASE WHEN a.account_type='unapplied_payment_liability' THEN je.credit_minor-je.debit_minor ELSE 0 END),0) AS unapplied_payment_liability_minor" +
+              " FROM ledger.journal_transactions jt" +
+              " JOIN ledger.journal_entries je ON je.journal_transaction_id=jt.id AND je.relationship_id=jt.relationship_id AND je.currency=jt.currency" +
+              " JOIN ledger.accounts a ON a.id=je.account_id AND a.relationship_id=je.relationship_id AND a.currency=je.currency" +
+              " WHERE jt.relationship_id=c.relationship_id AND jt.cycle_id=c.id" +
+              " GROUP BY a.owner_user_id, a.currency" +
+            " ) b), '[]'::jsonb) AS balances" +
             " FROM ledger.account_cycles c WHERE c.relationship_id=$1::uuid" +
           ") SELECT a.authorized, a.current_cycle_id," +
             " COALESCE(jsonb_agg(jsonb_build_object(" +
@@ -408,7 +424,7 @@ export function buildApprovalApi({
 
         return reply.code(200).send({
           currentCycleId: row.current_cycle_id,
-          balanceSemantics: "debit_minus_credit_minor",
+          balanceSemantics: "separate_account_classes_minor_units",
           cycles: row.cycles
         });
       } catch (error) {
