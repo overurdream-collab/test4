@@ -473,6 +473,24 @@ export function buildApprovalApi({
       };
       const hash = createHash("sha256").update(JSON.stringify(payload)).digest();
       try {
+        const prior = await pool.query<{
+          relationship_id: string; actor_user_id: string; device_id: string; operation_type: string;
+          request_hash: Buffer; business_state: string; server_version: string | number; server_sequence: string | number;
+        }>(
+          "SELECT relationship_id,actor_user_id,device_id,operation_type,request_hash,business_state,server_version,server_sequence FROM ledger.operations WHERE operation_id=$1::uuid",
+          [key]
+        );
+        if (prior.rows[0]) {
+          const existing = prior.rows[0];
+          const same = existing.relationship_id === request.params.relationshipId &&
+            existing.actor_user_id === principal.userId && existing.device_id === principal.deviceId &&
+            existing.operation_type === "sales_return" && Buffer.from(existing.request_hash).equals(hash);
+          if (!same) return reply.code(409).send({ error: "idempotency_conflict" });
+          return reply.code(200).send({
+            status: existing.business_state, operationId: key,
+            serverVersion: Number(existing.server_version), serverSequence: Number(existing.server_sequence)
+          });
+        }
         const check = await pool.query<{
           authorized: boolean; obligation_id: string | null; amount_minor: string | null;
           returned_minor: string | null; cycle_status: string | null; source_cycle_id: string | null;
