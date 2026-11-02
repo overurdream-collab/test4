@@ -59,6 +59,7 @@ BEGIN
   LEFT JOIN (
     SELECT obligation_id, sum(amount_minor) AS allocated
     FROM ledger.allocations
+    WHERE relationship_id = p_relationship_id
     GROUP BY obligation_id
   ) a ON a.obligation_id = o.id
   WHERE o.relationship_id = p_relationship_id;
@@ -69,6 +70,7 @@ BEGIN
   LEFT JOIN (
     SELECT payment_id, sum(amount_minor) AS allocated
     FROM ledger.allocations
+    WHERE relationship_id = p_relationship_id
     GROUP BY payment_id
   ) a ON a.payment_id = p.id
   WHERE p.relationship_id = p_relationship_id;
