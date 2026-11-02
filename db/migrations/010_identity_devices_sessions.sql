@@ -1,4 +1,5 @@
 -- Identity, verified phone ownership, devices, sessions and OTP challenges.
+-- Rate-limit reservation is atomic; the database remains the final enforcement boundary.
 -- OTP delivery is intentionally provider-agnostic; plaintext codes are never stored.
 
 CREATE SCHEMA IF NOT EXISTS identity;
