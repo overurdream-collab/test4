@@ -43,3 +43,38 @@
 ## الخطوة التالية
 
 تشغيل benchmark instrumented بعد نجاح CI، حفظ artifact JSON، ومقارنة دلائل 10/50 عاملاً. بعدها فقط يُحدّث هذا التقرير باستنتاج مدعوم أو يعلن أن الأدلة غير كافية.
+
+
+## نتائج التشغيل instrumented — Run #39
+
+- GitHub Actions: PostgreSQL million-event scale benchmark Run #39، ID `41471230009`، النتيجة `success`.
+- PostgreSQL 16 بدأ مع `shared_preload_libraries=pg_stat_statements`، وتم تنفيذ `CREATE EXTENSION` بنجاح؛ الحقل `pgStatStatementsAvailable=true`.
+- المقارنة في نفس تشغيل CI، مدة profile تقارب 10 ثوانٍ لكل مستوى:
+
+| القياس | 10 عمال | 50 عاملًا |
+|---|---:|---:|
+| الدورات المالية المكتملة | 3,833 | 3,505 |
+| throughput (lifecycle/s) | 380.64 | 341.09 |
+| p50 للدورة (ms) | 25.49 | 140.11 |
+| p95 للدورة (ms) | 32.61 | 187.41 |
+| p99 للدورة (ms) | 38.47 | 304.10 |
+| WAL bytes | 66,903,300 | 208,658,918 |
+| sampled WALWrite (LWLock + IO) | 111 + 0 | 389 + 2 |
+| sampled WALInsert | 0 | 77 |
+| sampled CPU/running | 40 | 187 |
+| sampled LockManager | 2 | 0 |
+| pg_stat_statements total execution time (ms) | 26,879.75 | 124,505.60 |
+| deadlocks | 0 | 0 |
+
+### قراءة النتائج
+
+1. **WAL contention هو أقوى إشارة قياس حالية عند 50 عاملًا**: WALWrite samples ارتفعت من 111 إلى 391، وظهرت 77 عينة WALInsert، كما ارتفع WAL volume من 66.9MB إلى 208.7MB رغم انخفاض عدد الدورات المكتملة. WAL لكل دورة ارتفع تقريبًا من 17.5KB إلى 59.5KB (نحو 3.4×).
+2. **CPU/running ارتفع بوضوح أيضًا** (40 إلى 187 عينة)، لذلك النتيجة لا تثبت أن WAL هو العامل الوحيد؛ هناك منافسة موارد/تزامن مصاحبة.
+3. **أقفال الحسابات/LockManager ليست مدعومة كسبب غالب في هذه العينة**: ظهر LockManager مرتين عند 10 عمال ولم يظهر عند 50، ولم تُسجل عينات lock غير ممنوحة في الملخص. لكن القياس الحالي لا يسجل مدة انتظار كل صف حساب على حدة، فلا ينفي كل contention على مستوى الصفوف.
+4. **relationship sequence counters**: عينات advisory exclusive locks موجودة (59 عند 10 مقابل 242 عند 50)، لكنها granted؛ لا نملك قياسًا يثبت أنها كانت تنتظر أو أنها سبب هبوط throughput.
+5. **journal triggers**: جزء من المراحل البطيئة. عند 50 عاملًا كانت p95 لمرحلة approve_allocation_and_post هي 57.94ms، وapprove_credit_charge_and_post 45.09ms، وapprove_payment_and_post 45.84ms. لا توجد حتى الآن attribution مستقلة لتكلفة trigger مقابل باقي SQL في المعاملة.
+6. `pg_stat_statements` أكد زيادة aggregate execution time من 26.9s إلى 124.5s، لكنه يجمع الاستعلامات كلها ولا يحدد وحده trigger أو statement بعينه.
+
+### الاستنتاج المنضبط
+
+**السبب الأرجح المدعوم حاليًا هو ضغط WAL (WALWrite/WALInsert) مع زيادة CPU/running تحت التزامن، وليس أقفال حسابات الأطراف أو relationship counter المثبتة كسبب وحيد.** الثقة متوسطة إلى منخفضة لأن كل مستوى قيس في profile قصير واحد على runner مشترك، وعدادات العينات ليست مدد انتظار. لا نعلن سعة 50 عاملًا. يلزم تكرار 60–300 ثانية على ظروف ثابتة، وقياس hot-relationship skew، وpg_stat_statements حسب queryid، وفصل زمن journal triggers/SQL قبل قرار تحسين بنيوي.
