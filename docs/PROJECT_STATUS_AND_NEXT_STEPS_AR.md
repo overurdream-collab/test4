@@ -576,3 +576,28 @@
 - توحيد PrincipalResolver الإنتاجي مع approval/sync/identity.
 - حل تعارض ترقيم migration مع فرع PR #42 غير المدمج قبل أي دمج له.
 - لا UI ولا نشر ولا مزود SMS حقيقي ولا قاعدة إنتاجية.
+
+
+## الخطوة 4 — دورة حياة الأجهزة وسجل الأحداث (فرع محلي)
+
+### الحالة
+- الفرع: `feat/device-lifecycle-event-log`.
+- لم يُدفع بعد ولم يُشغّل CI؛ لا ادعاء PASS.
+
+### المنفَّذ
+- `db/migrations/013_device_event_log.sql`: جدول `identity.device_events` append-only، مع triggers تسجل التسجيل والإلغاء وبدء الجلسة وإلغاءها، وbackfill للأجهزة السابقة، ومنع UPDATE/DELETE/TRUNCATE.
+- `GET /v1/devices`: عرض أجهزة المستخدم الحالي مع الحالة و`isCurrent`.
+- `GET /v1/devices/:deviceId/events`: سجل أحداث الجهاز بحد أقصى 200، مع عزل الملكية وإرجاع 404 لجهاز مستخدم آخر.
+- `DeviceRevokedError`: الجهاز الملغى يعيد **403** في sync بينما الجلسة الملغاة/غير الصالحة تبقى **401**.
+- اختبار sync يثبت رفض عملية unsent من جهاز ملغى دون استدعاء قاعدة البيانات.
+- `db/tests/014_device_event_log_test.sql` واختبارات API للأجهزة والسجل والاستثناءات.
+
+### المختبَر محليًا
+- `npm run typecheck`: ناجح.
+- `npm test`: 53 ناجحًا، 0 فشل.
+- migrations 001–013 واختبارات DB 001–014: ناجحة على PostgreSQL 18.6 بعد قاعدة نظيفة.
+
+### المتبقي
+- push وPR وCI على PostgreSQL 16.
+- توحيد PrincipalResolver في تركيب إنتاجي واحد مع approval/sync/identity.
+- لا UI ولا نشر ولا قاعدة إنتاجية.

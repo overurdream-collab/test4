@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import type { Pool } from "pg";
-import type { AuthenticatedPrincipal, PrincipalResolver } from "./approval-api.js";
+import {
+  DeviceRevokedError,
+  type AuthenticatedPrincipal,
+  type PrincipalResolver
+} from "./approval-api.js";
 
 type Dependencies = {
   pool: Pick<Pool, "query">;
@@ -65,7 +69,10 @@ export function buildSyncApi({ pool, resolvePrincipal }: Dependencies): FastifyI
         return reply.code(401).send({ error: "unauthorized" });
       }
       request.syncPrincipal = principal;
-    } catch {
+    } catch (error) {
+      if (error instanceof DeviceRevokedError) {
+        return reply.code(403).send({ error: "device_revoked" });
+      }
       return reply.code(401).send({ error: "unauthorized" });
     }
   });

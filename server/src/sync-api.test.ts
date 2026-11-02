@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Pool } from "pg";
+import { DeviceRevokedError } from "./approval-api.js";
 import { buildSyncApi } from "./sync-api.js";
 
 const relationshipId = "13000000-0000-0000-0000-000000000001";
@@ -134,5 +135,29 @@ test("event cursor rejects invalid or unbounded limits", async () => {
     url: "/v1/relationships/" + relationshipId + "/events?after=-1&limit=9999"
   });
   assert.equal(response.statusCode, 400);
+  await app.close();
+});
+
+test("a revoked device receives 403 and its unsent outbox operation is not accepted", async () => {
+  let calls = 0;
+  const app = buildSyncApi({
+    pool: makePool(async () => { calls++; return { rows: [] }; }),
+    resolvePrincipal: async () => { throw new DeviceRevokedError(); }
+  });
+  const response = await app.inject({
+    method: "POST",
+    url: operationUrl,
+    payload: {
+      operationId,
+      operationType: "credit_charge",
+      schemaVersion: 1,
+      baseVersion: 0,
+      payload: { currency: "YER", amountMinor: 1500 },
+      clientCreatedAt: "2026-11-02T00:00:00.000Z"
+    }
+  });
+  assert.equal(response.statusCode, 403);
+  assert.deepEqual(JSON.parse(response.body), { error: "device_revoked" });
+  assert.equal(calls, 0);
   await app.close();
 });
