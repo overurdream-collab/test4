@@ -271,3 +271,117 @@ test("relationship creation rejects incompatible business roles before database 
   await app.close();
   await authApp.close();
 });
+
+test("OTP verification issues a refresh token that rotates into a new pair", async () => {
+  const refreshCalls: unknown[][] = [];
+  const pool = makePool(async (sql: string, values: unknown[] = []) => {
+    if (sql.includes("consume_otp_challenge")) return { rows: [{ verified: true }] };
+    if (sql.includes("get_or_create_user_by_phone")) return { rows: [{ user_id: userId }] };
+    if (sql.includes("INSERT INTO identity.devices")) return { rows: [{ id: deviceId }] };
+    if (sql.includes("INSERT INTO identity.auth_sessions")) return { rows: [] };
+    if (sql.includes("INSERT INTO identity.refresh_tokens")) return { rows: [] };
+    if (sql.includes("identity.rotate_refresh_token")) {
+      refreshCalls.push(values);
+      return { rows: [{ status: "rotated", user_id: userId, device_id: deviceId, session_id: sessionId }] };
+    }
+    return { rows: [] };
+  });
+  const app = buildIdentityApi({
+    pool, otpDelivery: { sendCode: async () => undefined }, otpPepper, accessTokenSecret: accessSecret,
+    now: () => 1_800_000_000_000
+  });
+  const login = await app.inject({
+    method: "POST", url: "/v1/auth/otp/verify",
+    payload: { phoneE164: phone, code: "123456", deviceId, deviceLabel: "Test", platform: "android" }
+  });
+  assert.equal(login.statusCode, 200);
+  const loginBody = JSON.parse(login.body) as { refreshToken: string; refreshExpiresAt: string };
+  assert.equal(typeof loginBody.refreshToken, "string");
+  assert.ok(loginBody.refreshToken.length >= 20);
+  assert.ok(new Date(loginBody.refreshExpiresAt).getTime() > 1_800_000_000_000 + 29 * 24 * 60 * 60 * 1000);
+
+  const refresh = await app.inject({
+    method: "POST", url: "/v1/auth/refresh", payload: { refreshToken: loginBody.refreshToken }
+  });
+  assert.equal(refresh.statusCode, 200);
+  const refreshBody = JSON.parse(refresh.body) as { accessToken: string; refreshToken: string };
+  assert.equal(typeof refreshBody.accessToken, "string");
+  assert.notEqual(refreshBody.refreshToken, loginBody.refreshToken);
+  assert.equal(refreshCalls.length, 1);
+  const values = refreshCalls[0]!;
+  assert.equal(Buffer.isBuffer(values[0]), true);
+  assert.equal((values[0] as Buffer).length, 32);
+  await app.close();
+});
+
+test("refresh token expiry, reuse and inactive sessions all return 401", async () => {
+  for (const status of ["expired", "reuse_detected", "session_inactive", "invalid"]) {
+    const pool = makePool(async (sql: string) => {
+      if (sql.includes("identity.rotate_refresh_token")) {
+        return { rows: [{ status, user_id: userId, device_id: deviceId, session_id: sessionId }] };
+      }
+      return { rows: [] };
+    });
+    const app = buildIdentityApi({
+      pool, otpDelivery: { sendCode: async () => undefined }, otpPepper, accessTokenSecret: accessSecret,
+      now: () => 1_800_000_000_000
+    });
+    const response = await app.inject({
+      method: "POST", url: "/v1/auth/refresh", payload: { refreshToken: "r".repeat(43) }
+    });
+    assert.equal(response.statusCode, 401, status);
+    await app.close();
+  }
+});
+
+test("logout revokes every live session and refresh token on the authenticated device", async () => {
+  const sqlCalls: Array<{ sql: string; values: unknown[] }> = [];
+  const pool = makePool(async (sql: string, values: unknown[] = []) => {
+    sqlCalls.push({ sql, values });
+    if (sql.includes("consume_otp_challenge")) return { rows: [{ verified: true }] };
+    if (sql.includes("get_or_create_user_by_phone")) return { rows: [{ user_id: userId }] };
+    if (sql.includes("INSERT INTO identity.devices")) return { rows: [{ id: deviceId }] };
+    if (sql.includes("INSERT INTO identity.auth_sessions")) return { rows: [] };
+    if (sql.includes("INSERT INTO identity.refresh_tokens")) return { rows: [] };
+    if (sql.includes("FROM identity.auth_sessions s")) return { rows: [{ user_id: userId, device_id: deviceId }] };
+    if (sql.includes("identity.revoke_device_sessions")) return { rows: [{ revoked: 1 }] };
+    return { rows: [] };
+  });
+  const app = buildIdentityApi({
+    pool, otpDelivery: { sendCode: async () => undefined }, otpPepper, accessTokenSecret: accessSecret,
+    now: () => 1_800_000_000_000
+  });
+  const login = await app.inject({
+    method: "POST", url: "/v1/auth/otp/verify",
+    payload: { phoneE164: phone, code: "123456", deviceId, deviceLabel: "Test", platform: "android" }
+  });
+  const token = (JSON.parse(login.body) as { accessToken: string }).accessToken;
+  const logout = await app.inject({
+    method: "POST", url: "/v1/auth/logout",
+    headers: { authorization: "Bearer " + token }, payload: {}
+  });
+  assert.equal(logout.statusCode, 200);
+  assert.deepEqual(JSON.parse(logout.body), { status: "logged_out" });
+  const revokeCall = sqlCalls.find(call => call.sql.includes("identity.revoke_device_sessions"));
+  assert.ok(revokeCall);
+  assert.deepEqual(revokeCall?.values, [userId, deviceId]);
+  await app.close();
+});
+
+test("expired access tokens are rejected before any database lookup", async () => {
+  const claims = {
+    iss: "shared-commercial-ledger", aud: "shared-ledger-mobile", sub: userId,
+    did: deviceId, jti: sessionId, iat: 1_800_000_000, exp: 1_800_000_100
+  };
+  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify(claims)).toString("base64url");
+  const input = header + "." + payload;
+  const token = input + "." + createHmac("sha256", accessSecret).update(input).digest("base64url");
+  let calls = 0;
+  const resolver = createSessionPrincipalResolver(
+    makePool(async () => { calls++; return { rows: [] }; }),
+    accessSecret, () => 1_800_000_200_000
+  );
+  assert.equal(await resolver({ headers: { authorization: "Bearer " + token } } as any), null);
+  assert.equal(calls, 0);
+});
