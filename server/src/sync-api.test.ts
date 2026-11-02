@@ -92,6 +92,9 @@ test("event cursor returns only the authorized relationship's ordered events", a
     pool: makePool(async () => ({
       rows: [{
         authorized: true,
+        authorized: true,
+        sync_shard: 0,
+        floor_sequence: 0,
         server_sequence: 3,
         event_id: "43000000-0000-4000-8000-000000000003",
         operation_id: operationId,
@@ -108,7 +111,9 @@ test("event cursor returns only the authorized relationship's ordered events", a
   const body = JSON.parse(response.body);
   assert.equal(body.events.length, 1);
   assert.equal(body.events[0].serverSequence, 3);
-  assert.equal(body.nextCursor, 3);
+  assert.equal(body.events[0].syncShard, 0);
+  assert.equal(body.nextCursor['0'], 3);
+  assert.equal(body.nextCursor['7'], 7000000000000);
   await app.close();
 });
 
