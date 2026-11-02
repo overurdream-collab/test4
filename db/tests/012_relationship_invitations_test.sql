@@ -1,4 +1,4 @@
-\\set ON_ERROR_STOP on
+\set ON_ERROR_STOP on
 BEGIN;
 DO $relationship_tests$
 DECLARE inviter uuid; invitee uuid; wrong_user uuid; invitee_later uuid;
