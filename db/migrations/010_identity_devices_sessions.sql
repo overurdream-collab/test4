@@ -92,11 +92,7 @@ CREATE OR REPLACE FUNCTION identity.create_otp_challenge(
 ) RETURNS uuid LANGUAGE plpgsql AS $otp$
 DECLARE phone_requests bigint; ip_requests bigint; challenge_id uuid;
 BEGIN
-  IF p_phone_e164 IS NULL OR p_phone_e164 !~ '^\+[1-9][0-9]{7,14}$'
-     OR p_code_hash IS NULL OR octet_length(p_code_hash)<>32
-     OR p_ip_hash IS NULL OR octet_length(p_ip_hash)<>32
-     OR p_expires_at<=clock_timestamp()
-     OR p_expires_at>clock_timestamp()+interval '6 minutes' THEN
+  IF p_code_hash IS NULL OR octet_length(p_code_hash)<>32 OR p_ip_hash IS NULL OR octet_length(p_ip_hash)<>32 OR p_expires_at<=clock_timestamp() OR p_expires_at>clock_timestamp()+interval '6 minutes' THEN
     RAISE EXCEPTION 'Invalid OTP challenge request' USING ERRCODE='22023';
   END IF;
   PERFORM pg_advisory_xact_lock(hashtextextended('otp-phone:'||p_phone_e164,0));
