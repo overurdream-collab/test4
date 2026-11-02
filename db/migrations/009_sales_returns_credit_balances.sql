@@ -100,3 +100,34 @@ END; $$;
 CREATE TRIGGER operations_materialize_sales_return
 AFTER UPDATE OF business_state ON ledger.operations
 FOR EACH ROW EXECUTE FUNCTION ledger.materialize_approved_sales_return();
+
+-- A credit balance is still unsettled. Prevent white-page reset from hiding
+-- a buyer credit in an archived cycle before it is consumed or refunded.
+CREATE OR REPLACE FUNCTION ledger.guard_settlement_reset_has_no_signed_credit()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE target_cycle uuid;
+BEGIN
+ IF TG_TABLE_NAME='settlement_requests' THEN
+  target_cycle:=NEW.cycle_id;
+ ELSIF NEW.decision='approved' THEN
+  SELECT cycle_id INTO target_cycle FROM ledger.settlement_requests WHERE id=NEW.request_id
+   AND relationship_id=NEW.relationship_id;
+ ELSE
+  RETURN NEW;
+ END IF;
+ IF EXISTS(
+  SELECT 1 FROM ledger.member_currency_positions
+  WHERE relationship_id=NEW.relationship_id AND cycle_id=target_cycle
+    AND net_position_minor<>0
+ ) THEN
+  RAISE EXCEPTION 'Cannot reset a cycle with an unsettled signed party balance or credit'
+   USING ERRCODE='23514';
+ END IF;
+ RETURN NEW;
+END; $$;
+CREATE TRIGGER settlement_requests_require_zero_signed_positions
+BEFORE INSERT ON ledger.settlement_requests
+FOR EACH ROW EXECUTE FUNCTION ledger.guard_settlement_reset_has_no_signed_credit();
+CREATE TRIGGER settlement_decisions_require_zero_signed_positions
+BEFORE INSERT ON ledger.settlement_decisions
+FOR EACH ROW EXECUTE FUNCTION ledger.guard_settlement_reset_has_no_signed_credit();
