@@ -121,7 +121,7 @@ BEGIN
     END IF;
     RAISE EXCEPTION 'Invitation id reused with different content' USING ERRCODE='23505';
   END IF;
-  IF NOT EXISTS (SELECT 1 FROM identity.users WHERE id=p_inviter_user_id AND status='active') OR
+  IF NOT EXISTS (SELECT 1 FROM identity.users u WHERE u.id=p_inviter_user_id AND u.status='active') OR
      NOT EXISTS (SELECT 1 FROM identity.phone_identities WHERE user_id=p_inviter_user_id) THEN
     RAISE EXCEPTION 'Inviter is not an active verified user' USING ERRCODE='42501';
   END IF;
