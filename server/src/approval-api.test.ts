@@ -297,7 +297,10 @@ test("returns current and archived cycles with explicit debit-minus-credit balan
               balances: [{
                 ownerUserId: userId,
                 currency: "YER",
-                debitMinusCreditMinor: "12500"
+                receivableMinor: "12500",
+                payableMinor: "0",
+                unappliedPaymentAssetMinor: "0",
+                unappliedPaymentLiabilityMinor: "0"
               }]
             }
           ]
@@ -310,7 +313,7 @@ test("returns current and archived cycles with explicit debit-minus-credit balan
   assert.equal(response.statusCode, 200);
   assert.deepEqual(JSON.parse(response.body), {
     currentCycleId: "18000000-0000-0000-0000-000000000002",
-    balanceSemantics: "debit_minus_credit_minor",
+    balanceSemantics: "separate_account_classes_minor_units",
     cycles: [
       {
         cycleId: "18000000-0000-0000-0000-000000000002",
@@ -331,11 +334,52 @@ test("returns current and archived cycles with explicit debit-minus-credit balan
         balances: [{
           ownerUserId: userId,
           currency: "YER",
-          debitMinusCreditMinor: "12500"
+          receivableMinor: "12500",
+                payableMinor: "0",
+                unappliedPaymentAssetMinor: "0",
+                unappliedPaymentLiabilityMinor: "0"
         }]
       }
     ]
   });
+  await app.close();
+});
+
+test("account-cycle balance contract keeps receivables, payables and unapplied payments separate", async () => {
+  const app = buildApprovalApi({
+    pool: makePool(async (sql) => {
+      assert.ok(sql.includes("a.account_type='party_receivable'"));
+      assert.ok(sql.includes("a.account_type='party_payable'"));
+      assert.ok(sql.includes("a.account_type='unapplied_payment_asset'"));
+      assert.ok(sql.includes("a.account_type='unapplied_payment_liability'"));
+      assert.ok(sql.includes("jt.cycle_id=c.id"));
+      return { rows: [{
+        authorized: true,
+        current_cycle_id: "18000000-0000-0000-0000-000000000002",
+        cycles: [{
+          cycleId: "18000000-0000-0000-0000-000000000002",
+          cycleNumber: 2,
+          title: "صفحة بيضاء 2",
+          status: "active",
+          startedAt: "2026-11-02T10:00:00.000Z",
+          endedAt: null,
+          balances: [
+            { ownerUserId: userId, currency: "YER", receivableMinor: "12000", payableMinor: "0", unappliedPaymentAssetMinor: "3000", unappliedPaymentLiabilityMinor: "0" },
+            { ownerUserId: "21000000-0000-0000-0000-000000000003", currency: "YER", receivableMinor: "0", payableMinor: "12000", unappliedPaymentAssetMinor: "0", unappliedPaymentLiabilityMinor: "3000" }
+          ]
+        }]
+      }] };
+    }),
+    resolvePrincipal: async () => ({ userId, deviceId })
+  });
+  const response = await app.inject({ method: "GET", url: accountCyclesUrl });
+  assert.equal(response.statusCode, 200);
+  const body = JSON.parse(response.body);
+  assert.equal(body.balanceSemantics, "separate_account_classes_minor_units");
+  assert.deepEqual(body.cycles[0].balances, [
+    { ownerUserId: userId, currency: "YER", receivableMinor: "12000", payableMinor: "0", unappliedPaymentAssetMinor: "3000", unappliedPaymentLiabilityMinor: "0" },
+    { ownerUserId: "21000000-0000-0000-0000-000000000003", currency: "YER", receivableMinor: "0", payableMinor: "12000", unappliedPaymentAssetMinor: "0", unappliedPaymentLiabilityMinor: "3000" }
+  ]);
   await app.close();
 });
 
