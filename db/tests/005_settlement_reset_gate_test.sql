@@ -89,7 +89,7 @@ SELECT * FROM ledger.accept_operation(
  0,1,now()
 );
 
-DO $
+DO $$
 BEGIN
   BEGIN
     PERFORM ledger.request_settlement_reset(
@@ -102,7 +102,7 @@ BEGIN
     IF SQLERRM NOT LIKE 'Cannot request settlement reset:%' THEN RAISE; END IF;
   END;
 END;
-$;
+$$;
 
 SELECT ledger.decide_operation(
  '65000000-0000-0000-0000-000000000004',
@@ -112,7 +112,7 @@ SELECT ledger.decide_operation(
  1,'approved','supply confirmed'
 );
 
-DO $
+DO $$
 DECLARE req uuid;
 BEGIN
   req := ledger.request_settlement_reset(
