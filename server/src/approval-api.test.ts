@@ -420,3 +420,29 @@ test("returns 404 when the relationship does not exist", async () => {
   assert.equal(response.statusCode, 404);
   await app.close();
 });
+
+
+test("account cycle API preserves signed negative receivable and payable values", async () => {
+  const app = buildApprovalApi({
+    pool: makePool(async () => ({ rows: [{
+      authorized: true,
+      current_cycle_id: "18000000-0000-0000-0000-000000000002",
+      cycles: [{
+        cycleId: "18000000-0000-0000-0000-000000000002",
+        cycleNumber: 2, title: "صفحة بيضاء 2", status: "active",
+        startedAt: "2026-11-02T10:00:00.000Z", endedAt: null,
+        balances: [
+          { ownerUserId: userId, currency: "YER", receivableMinor: "-5000", payableMinor: "0", unappliedPaymentAssetMinor: "0", unappliedPaymentLiabilityMinor: "0" },
+          { ownerUserId: "21000000-0000-0000-0000-000000000003", currency: "YER", receivableMinor: "0", payableMinor: "-5000", unappliedPaymentAssetMinor: "0", unappliedPaymentLiabilityMinor: "0" }
+        ]
+      }]
+    }] })),
+    resolvePrincipal: async () => ({ userId, deviceId })
+  });
+  const response = await app.inject({ method: "GET", url: accountCyclesUrl });
+  assert.equal(response.statusCode, 200);
+  const balances = JSON.parse(response.body).cycles[0].balances;
+  assert.equal(balances[0].receivableMinor, "-5000");
+  assert.equal(balances[1].payableMinor, "-5000");
+  await app.close();
+});
