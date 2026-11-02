@@ -57,6 +57,41 @@ SELECT
 FROM ledger.relationships r
 WHERE r.id='17000000-0000-0000-0000-000000000001';
 
+-- Before allocation, do not net an unpaid obligation against an unapplied payment.
+-- Keep the four account classes distinct in the cycle-balance API contract.
+DO $balance_before_allocation$
+DECLARE creditor_receivable numeric; creditor_unapplied_liability numeric;
+        debtor_payable numeric; debtor_unapplied_asset numeric; cycle_now uuid;
+BEGIN
+  SELECT old_cycle_id INTO cycle_now FROM lifecycle_ids;
+  SELECT
+    COALESCE(sum(CASE WHEN a.account_type='party_receivable' THEN je.debit_minor-je.credit_minor ELSE 0 END),0),
+    COALESCE(sum(CASE WHEN a.account_type='unapplied_payment_liability' THEN je.credit_minor-je.debit_minor ELSE 0 END),0)
+  INTO creditor_receivable,creditor_unapplied_liability
+  FROM ledger.journal_transactions jt
+  JOIN ledger.journal_entries je ON je.journal_transaction_id=jt.id
+  JOIN ledger.accounts a ON a.id=je.account_id
+  WHERE jt.relationship_id='17000000-0000-0000-0000-000000000001'
+    AND jt.cycle_id=cycle_now AND a.owner_user_id='27000000-0000-0000-0000-000000000001';
+
+  SELECT
+    COALESCE(sum(CASE WHEN a.account_type='party_payable' THEN je.credit_minor-je.debit_minor ELSE 0 END),0),
+    COALESCE(sum(CASE WHEN a.account_type='unapplied_payment_asset' THEN je.debit_minor-je.credit_minor ELSE 0 END),0)
+  INTO debtor_payable,debtor_unapplied_asset
+  FROM ledger.journal_transactions jt
+  JOIN ledger.journal_entries je ON je.journal_transaction_id=jt.id
+  JOIN ledger.accounts a ON a.id=je.account_id
+  WHERE jt.relationship_id='17000000-0000-0000-0000-000000000001'
+    AND jt.cycle_id=cycle_now AND a.owner_user_id='27000000-0000-0000-0000-000000000002';
+
+  IF creditor_receivable <> 5000 OR creditor_unapplied_liability <> 5000
+     OR debtor_payable <> 5000 OR debtor_unapplied_asset <> 5000 THEN
+    RAISE EXCEPTION 'Unapplied payment must remain separate from the obligation: creditor receivable %, creditor unapplied liability %, debtor payable %, debtor unapplied asset %',
+      creditor_receivable,creditor_unapplied_liability,debtor_payable,debtor_unapplied_asset;
+  END IF;
+END;
+$balance_before_allocation$;
+
 -- 3) Allocate the entire payment to the obligation and approve the allocation.
 SELECT * FROM ledger.accept_operation(
  '37000000-0000-0000-0000-000000000003',
@@ -78,6 +113,28 @@ SELECT ledger.decide_operation(
  '27000000-0000-0000-0000-000000000001',
  1,'approved','full lifecycle allocation approved'
 );
+
+DO $balance_after_allocation$
+DECLARE nonzero_classes bigint; cycle_now uuid;
+BEGIN
+  SELECT old_cycle_id INTO cycle_now FROM lifecycle_ids;
+  SELECT count(*) INTO nonzero_classes
+  FROM (
+    SELECT a.owner_user_id,a.currency,a.account_type,
+           sum(je.debit_minor-je.credit_minor) AS signed_balance
+    FROM ledger.journal_transactions jt
+    JOIN ledger.journal_entries je ON je.journal_transaction_id=jt.id
+    JOIN ledger.accounts a ON a.id=je.account_id
+    WHERE jt.relationship_id='17000000-0000-0000-0000-000000000001'
+      AND jt.cycle_id=cycle_now
+    GROUP BY a.owner_user_id,a.currency,a.account_type
+  ) account_balances
+  WHERE signed_balance <> 0;
+  IF nonzero_classes <> 0 THEN
+    RAISE EXCEPTION 'Fully allocated lifecycle should clear all four account classes; nonzero groups %',nonzero_classes;
+  END IF;
+END;
+$balance_after_allocation$;
 -- A separate approved allocation-command fixture remains pinned to the old cycle.
 -- It is not posted to the journal; it exists solely to isolate the cycle guard.
 INSERT INTO ledger.operations

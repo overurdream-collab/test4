@@ -167,10 +167,14 @@ GET /v1/relationships/{relationshipId}/account-cycles يعيد الدورة ال
 
 - currentCycleId: معرّف الدورة الحالية.
 - cycles[]: رقم الدورة وعنوانها وحالتها وتواريخ بدايتها/نهايتها وbalances[].
-- balances[]: ownerUserId وcurrency وdebitMinusCreditMinor.
-- balanceSemantics = debit_minus_credit_minor: القيمة الموجبة تعني أن إجمالي المدين أكبر من إجمالي الدائن في حساب ذلك العضو/العملة/الدورة؛ والسالبة تعني أن إجمالي الدائن أكبر. لا تسمِّ الواجهة القيمة «له» أو «عليه» قبل تطبيق منظور الحساب التجاري وتثبيت صياغة العرض.
-- ترسل قيمة debitMinusCreditMinor كنص عشري حتى لا تفقد دقة bigint/numeric عند مرورها عبر JavaScript/JSON.
+- balances[]: ownerUserId وcurrency، إضافة إلى أربعة أرصدة مستقلة:
+  - receivableMinor: ذمم هذا العضو المدينة لصالحه، وتساوي SUM(debit-credit) لحساب party_receivable.
+  - payableMinor: الذمم المستحقة على هذا العضو، وتساوي SUM(credit-debit) لحساب party_payable.
+  - unappliedPaymentAssetMinor: دفعات سجلها العضو ولم يخصصها، وتساوي SUM(debit-credit) لحساب unapplied_payment_asset.
+  - unappliedPaymentLiabilityMinor: دفعات استلمها العضو ولم تخصص، وتساوي SUM(credit-debit) لحساب unapplied_payment_liability.
+- balanceSemantics = separate_account_classes_minor_units. لا تجمع الفئات الأربع في صافي واحد ولا تخصم الدفعة غير المخصصة من الذمم؛ تسجيل الدفعة وحده لا يسدد التزامًا. كل قيمة ترسل كنص عشري لحماية دقة bigint/numeric. العملة مستقلة ولا يوجد جمع بين YER/SAR/USD.
 - الدورة الجديدة الخالية من القيود تعيد balances: []، أي لا توجد حركات مالية مسجلة فيها حتى الآن.
+- الوصول مقصور على العضو النشط في العلاقة، مع 401 لغير المصادق و403 لغير العضو و404 لعلاقة غير موجودة.
 
 طبقة المصادقة ما زالت تعتمد على PrincipalResolver المحقون ولا تمثل تسجيل دخول إنتاجيًا.
 
