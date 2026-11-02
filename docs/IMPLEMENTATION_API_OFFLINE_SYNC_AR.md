@@ -225,4 +225,11 @@ GET /v1/relationships/{relationshipId}/account-cycles يعيد الدورة ال
 ### الاختبارات
 اختبارات HTTP للإنشاء، إعادة المحاولة بعد الاعتماد، تعارض المفتاح، principal-only identity، تجاوز المبلغ، الدورة المؤرشفة، الكشف وعزل العضوية، منع التعديل، منع الموافقة الذاتية، وتعارض الحد عند الاعتماد.
 
-**الحالة:** PR #37 ينتظر Approval API checks وPostgreSQL CI. لا migration جديدة، ولا نشر أو تعديل إنتاج.
+**الحالة:** PR #38 ينتظر Approval API checks وPostgreSQL CI. لا migration جديدة، ولا نشر أو تعديل إنتاج.
+
+
+## حالة واجهة المرتجعات بعد الدمج — 2026-11-02
+- PR #38 مدمج إلى main؛ Merge SHA `38edccfb9eeefb6828685cf9bbb207cb485444a3`.
+- Approval API Run #96: 44/44 passed؛ PostgreSQL Run #175: success.
+- POST sales-returns، idempotency بعد الاعتماد، قرار الطرف المقابل، GET كشف حسب الدورة، وPATCH رفض تعديل المرتجع المنشور موثقة ومختبرة.
+- لا migration جديدة؛ migration 009 هي مصدر قواعد النشر والحد التراكمي والقيد العكسي.
