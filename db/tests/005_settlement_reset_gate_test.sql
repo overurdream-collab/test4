@@ -92,7 +92,7 @@ BEGIN
   END IF;
   IF (SELECT count(*) FROM ledger.settlement_requests
       WHERE relationship_id='15000000-0000-0000-0000-000000000001'
-        AND status='awaiting_counterparty') <> 1 THEN
+        AND status='requested') <> 1 THEN
     RAISE EXCEPTION 'Expected exactly one pending settlement request';
   END IF;
 END;
