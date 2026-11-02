@@ -107,6 +107,7 @@ class HttpSyncTransport implements SyncTransport {
       businessState: response['businessState']! as String,
       serverVersion: (response['serverVersion']! as num).toInt(),
       serverSequence: (response['serverSequence']! as num).toInt(),
+      syncShard: (response['syncShard']! as num).toInt(),
     );
   }
 
