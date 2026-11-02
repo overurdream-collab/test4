@@ -1,0 +1,63 @@
+# Financial lifecycle soak: before/after analysis — 2026-11-02
+
+## Decision
+PR #42 is **not merged**. All 12 post-change matrix jobs and all three other CI checks passed, but the performance acceptance criterion did not. Do not describe hot-relationship contention as fixed or claim validated 50-worker production capacity.
+
+## Test design
+- PostgreSQL 16, 50 concurrent workers.
+- Same deterministic seed: `mcias-ledger-soak-2026-11-02-v1`.
+- 1,000 relationships; hot scenario targets 90% of attempts to one relationship.
+- Uniform and hot scenarios, 60s and 300s, three independent fresh-database repetitions per cell.
+- Captures pg_stat_activity, wait events and query text/query IDs, pg_locks, pg_stat_wal, pg_stat_database, pg_stat_statements, lifecycle/stage p50/p95/p99, deadlocks and errors.
+
+## Before (baseline)
+- Hot 60s: 108–130 lifecycles/s; p95 798–889 ms.
+- Uniform 60s: 194–251 lifecycles/s; p95 421–484 ms.
+- Hot 300s: 79–95 lifecycles/s; p95 1,170–1,360 ms.
+- Uniform 300s: 116–119 lifecycles/s; p95 688–2,050 ms (high variability).
+
+## After (migration 012), all repetitions
+
+| Scenario | Repeat | Duration | Lifecycles/s | p50 ms | p95 ms | p99 ms | Errors | Deadlocks |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Hot | 1 | 60s | 112.368 | 416.32 | 910.45 | 1229.82 | 0 | 0 |
+| Hot | 2 | 60s | 117.686 | 399.32 | 859.47 | 1118.35 | 0 | 0 |
+| Hot | 3 | 60s | 123.331 | 387.60 | 814.90 | 1036.60 | 0 | 0 |
+| Uniform | 1 | 60s | 241.839 | 186.78 | 368.86 | 541.30 | 0 | 0 |
+| Uniform | 2 | 60s | 227.153 | 197.29 | 400.50 | 546.20 | 0 | 0 |
+| Uniform | 3 | 60s | 198.463 | 233.16 | 404.63 | 618.70 | 0 | 0 |
+| Hot | 1 | 300s | 81.454 | 568.56 | 1308.54 | 1738.33 | 0 | 0 |
+| Hot | 2 | 300s | 80.941 | 571.03 | 1315.36 | 1727.53 | 0 | 0 |
+| Hot | 3 | 300s | 81.854 | 570.01 | 1299.78 | 1674.80 | 0 | 0 |
+| Uniform | 1 | 300s | 120.677 | 245.12 | 2118.24 | 2495.69 | 0 | 0 |
+| Uniform | 2 | 300s | 104.043 | 327.21 | 2017.59 | 3397.42 | 0 | 0 |
+| Uniform | 3 | 300s | 110.252 | 298.66 | 2182.84 | 2872.03 | 0 | 0 |
+
+## Diagnosis
+The 90% hot-share target was achieved (observed 89.96–90.12%). Hot runs still show very high transactionid and LockManager wait samples. Query-attributed waits repeatedly point to the top-level calls:
+- `SELECT * FROM ledger.accept_operation(...)`
+- `SELECT ledger.decide_operation(...)`
+
+For hot 300s repeat 1, samples include 10,704 transactionid waits in `accept_operation` and 10,755 in `decide_operation`; repeat 2 includes 11,156 and 11,214 respectively. The same pattern persists after migration 012.
+
+The measured contention was **not removed** by moving the operation insert ahead of sequence allocation and optimizing the counter update. Top-level query attribution does not identify the exact internal row/trigger responsible, so the next change must not guess.
+
+Uniform 300s runs also show high WALWrite/WALSync and CPU/running pressure, with p95 around 2.0–2.2 seconds. This broad-load signal is distinct from the hot-relationship bottleneck.
+
+## Change and safety
+Migration 012 and its regression test are on the PR branch only. The migration preserves `sales_return` introduced by migration 009. Migration/test CI and existing Approval API, PostgreSQL tests and million-event benchmark passed on head `1b20ba1dea908e3725a7b3fc0c60865f4f3099ac`.
+
+No production database was modified and no deployment occurred. PR #42 remains open and unmerged.
+
+## Required next investigation
+1. Instrument internal SQL phases separately inside `accept_operation` and `decide_operation` (counter allocation, operation row, relationship event, approval transition, journal posting/triggers).
+2. Capture blocker PID / blocked PID and `pg_blocking_pids()` with relation and tuple identity where available; query-level aggregation is insufficient to prove the exact row.
+3. Isolate the lock common to the hot relationship during acceptance and decision. Do not change journal, counters, or approval semantics without proof.
+4. Implement one targeted fix only after attribution, then rerun the full 12-cell matrix on the same seed. Acceptance requires three consecutive hot repetitions at both durations to beat baseline without regressions, retaining every result.
+
+## Workflow proof
+- Financial soak: run 41480600293 — 12/12 matrix jobs successful.
+- Approval API: run 41480600290 — success.
+- PostgreSQL million-event benchmark: run 41480600172 — success.
+- Ledger PostgreSQL tests: run 41480600450 — success.
+- PR: https://github.com/overurdream-collab/test4/pull/42 (open, not merged).
