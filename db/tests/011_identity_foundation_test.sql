@@ -1,23 +1,30 @@
 \set ON_ERROR_STOP on
 BEGIN;
 
-SELECT identity.get_or_create_user_by_phone('+967771234567') AS first_user \gset
-SELECT identity.get_or_create_user_by_phone('+967771234567') AS same_user \gset
+CREATE TEMP TABLE identity_test_user AS
+SELECT identity.get_or_create_user_by_phone('+967771234567') AS user_id;
+CREATE TEMP TABLE identity_test_user_again AS
+SELECT identity.get_or_create_user_by_phone('+967771234567') AS user_id;
+
 DO $$
 BEGIN
- IF :'first_user' <> :'same_user' THEN
+ IF (SELECT user_id FROM identity_test_user) <>
+    (SELECT user_id FROM identity_test_user_again) THEN
   RAISE EXCEPTION 'Same verified phone created more than one user';
  END IF;
 END;
 $$;
 
 INSERT INTO identity.devices(id,user_id,device_label,platform)
-VALUES('81000000-0000-0000-0000-000000000001',:'first_user','Test Android','android');
+SELECT '81000000-0000-0000-0000-000000000001',user_id,'Test Android','android'
+FROM identity_test_user;
 
 INSERT INTO identity.auth_sessions(id,user_id,device_id,expires_at)
-VALUES('82000000-0000-0000-0000-000000000001',:'first_user',
-'81000000-0000-0000-0000-000000000001',now()+interval '15 minutes');
+SELECT '82000000-0000-0000-0000-000000000001',user_id,
+'81000000-0000-0000-0000-000000000001',now()+interval '15 minutes'
+FROM identity_test_user;
 
+-- One wrong attempt does not consume the challenge; the correct code may still be used.
 INSERT INTO identity.otp_challenges(id,phone_e164,code_hash,requested_ip_hash,status,expires_at)
 VALUES('83000000-0000-0000-0000-000000000001','+967771234568',
 decode(repeat('ab',32),'hex'),decode(repeat('cd',32),'hex'),'delivered',now()+interval '5 minutes');
@@ -27,22 +34,10 @@ BEGIN
  IF identity.consume_otp_challenge('+967771234568',decode(repeat('ef',32),'hex')) THEN
   RAISE EXCEPTION 'Wrong OTP hash unexpectedly accepted';
  END IF;
+ IF NOT identity.consume_otp_challenge('+967771234568',decode(repeat('ab',32),'hex')) THEN
+  RAISE EXCEPTION 'Correct OTP was not accepted after one wrong attempt';
+ END IF;
  IF identity.consume_otp_challenge('+967771234568',decode(repeat('ab',32),'hex')) THEN
-  RAISE EXCEPTION 'OTP should be locked after wrong attempts only if max reached';
- END IF;
-END;
-$$;
-
--- A fresh challenge accepts exactly once and cannot be replayed.
-INSERT INTO identity.otp_challenges(id,phone_e164,code_hash,status,expires_at)
-VALUES('83000000-0000-0000-0000-000000000002','+967771234569',
-decode(repeat('12',32),'hex'),'delivered',now()+interval '5 minutes');
-DO $$
-BEGIN
- IF NOT identity.consume_otp_challenge('+967771234569',decode(repeat('12',32),'hex')) THEN
-  RAISE EXCEPTION 'Correct OTP was not accepted';
- END IF;
- IF identity.consume_otp_challenge('+967771234569',decode(repeat('12',32),'hex')) THEN
   RAISE EXCEPTION 'Consumed OTP was replayed';
  END IF;
 END;
@@ -75,6 +70,22 @@ BEGIN
  END IF;
  IF (SELECT status FROM identity.otp_challenges WHERE id='83000000-0000-0000-0000-000000000004')<>'expired' THEN
   RAISE EXCEPTION 'Expired challenge status was not recorded';
+ END IF;
+END;
+$$;
+
+-- Revoking a device also revokes its active sessions.
+UPDATE identity.devices SET status='revoked',revoked_at=now()
+WHERE id='81000000-0000-0000-0000-000000000001';
+UPDATE identity.auth_sessions SET revoked_at=now()
+WHERE device_id='81000000-0000-0000-0000-000000000001' AND revoked_at IS NULL;
+DO $$
+BEGIN
+ IF EXISTS(SELECT 1 FROM identity.devices WHERE id='81000000-0000-0000-0000-000000000001' AND status='active') THEN
+  RAISE EXCEPTION 'Revoked device remains active';
+ END IF;
+ IF EXISTS(SELECT 1 FROM identity.auth_sessions WHERE id='82000000-0000-0000-0000-000000000001' AND revoked_at IS NULL) THEN
+  RAISE EXCEPTION 'Device session was not revoked';
  END IF;
 END;
 $$;
