@@ -305,6 +305,15 @@ try {
     "current_setting('max_connections') AS max_connections"
   );
   console.log(JSON.stringify({ profile: "financial lifecycle lock/WAL/queryid profile", durationMs: configuredDurationMs, environment: environment.rows[0] }));
+  const journalSample = await monitorPool.query("SELECT id FROM ledger.journal_transactions LIMIT 1");
+  if (journalSample.rows[0]) {
+    const journalPlan = await monitorPool.query(
+      "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) SELECT count(*), COALESCE(sum(debit_minor),0), COALESCE(sum(credit_minor),0) " +
+      "FROM ledger.journal_entries WHERE journal_transaction_id=$1::uuid",
+      [journalSample.rows[0].id]
+    );
+    console.log(JSON.stringify({ label: "journal_balance_trigger_query_plan", journalTransactionId: journalSample.rows[0].id, plan: journalPlan.rows[0]["QUERY PLAN"] }));
+  }
   await profilePhase(10, configuredDurationMs);
   await profilePhase(50, configuredDurationMs);
 } finally {
