@@ -32,7 +32,7 @@ async function snapshot(){
   monitorPool.query("SELECT xact_commit,blks_hit,blks_read,tup_inserted,tup_updated,deadlocks,temp_bytes FROM pg_stat_database WHERE datname=current_database()")
  ]);
  let statements=null,error=null;
- try{const r=await monitorPool.query("SELECT queryid::text AS queryid,calls,total_exec_time,mean_exec_time,rows,shared_blks_hit,shared_blks_read,temp_blks_written FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 100");statements=r.rows;}catch(e){error=String(e);}
+ try{const r=await monitorPool.query("SELECT queryid::text AS queryid,left(query,800) AS query,calls,total_exec_time,mean_exec_time,rows,shared_blks_hit,shared_blks_read,temp_blks_written FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 100");statements=r.rows;}catch(e){error=String(e);}
  return {wal:wal.rows[0],database:db.rows[0],statements,statementsError:error};
 }
 const seedOffset=Number.parseInt(createHash("sha256").update(seed).digest("hex").slice(0,6),16);
@@ -45,20 +45,22 @@ async function main(){
  const ext=await monitorPool.query("SELECT extname FROM pg_extension WHERE extname='pg_stat_statements'");
  const metadata={benchmark:"financial_lifecycle_soak",seed,repeat,scenario,hotRelationshipId:scenario==="hot"?hotRelationship.id:null,hotShareTargetPercent:scenario==="hot"?90:0,concurrency,targetDurationSeconds:durationSeconds,environment:env.rows[0],pgStatStatementsEnabled:ext.rowCount===1};
  console.log("SOAK_METADATA "+JSON.stringify(metadata));
- const before=await snapshot(),waitSamples=Object.create(null),lockSamples=Object.create(null),activitySamples=[];
+ const before=await snapshot(),waitSamples=Object.create(null),lockSamples=Object.create(null),blockedByQuery=Object.create(null),activitySamples=[];
  let stop=false;
  const monitor=(async()=>{while(!stop){try{
-  const [waits,locks,activity]=await Promise.all([
+  const [waits,locks,activity,blocked]=await Promise.all([
    monitorPool.query("SELECT COALESCE(wait_event_type,'CPU_or_running') AS wait_type,COALESCE(wait_event,'none') AS wait_event,state,count(*)::int AS sessions FROM pg_stat_activity WHERE application_name='ledger-financial-soak' AND state='active' GROUP BY 1,2,3"),
    monitorPool.query("SELECT l.locktype,l.mode,l.granted,count(*)::int AS lock_count FROM pg_locks l JOIN pg_stat_activity a USING(pid) WHERE a.application_name='ledger-financial-soak' GROUP BY l.locktype,l.mode,l.granted"),
-   monitorPool.query("SELECT state,wait_event_type,wait_event,count(*)::int AS sessions,max(clock_timestamp()-query_start) AS longest_query_age FROM pg_stat_activity WHERE application_name='ledger-financial-soak' GROUP BY state,wait_event_type,wait_event")
+   monitorPool.query("SELECT state,wait_event_type,wait_event,count(*)::int AS sessions,max(clock_timestamp()-query_start) AS longest_query_age FROM pg_stat_activity WHERE application_name='ledger-financial-soak' GROUP BY state,wait_event_type,wait_event"),
+   monitorPool.query("SELECT query_id::text AS queryid,wait_event,count(*)::int AS samples,left(query,800) AS query FROM pg_stat_activity WHERE application_name='ledger-financial-soak' AND wait_event_type='Lock' GROUP BY query_id,wait_event,left(query,800)")
   ]);
   for(const x of waits.rows){const k=[x.wait_type,x.wait_event,x.state].join("|");waitSamples[k]=(waitSamples[k]??0)+x.sessions;}
   for(const x of locks.rows){const k=[x.locktype,x.mode,x.granted].join("|");lockSamples[k]=(lockSamples[k]??0)+x.lock_count;}
+  for(const x of blocked.rows){const k=[x.queryid,x.wait_event].join("|");const prior=blockedByQuery[k]??{queryid:x.queryid,waitEvent:x.wait_event,samples:0,query:x.query};prior.samples+=x.samples;blockedByQuery[k]=prior;}
   activitySamples.push({at:new Date().toISOString(),groups:activity.rows});
  }catch(e){process.stderr.write("monitor sample failed: "+String(e)+"\n");}await new Promise(r=>setTimeout(r,500));}})();
- const start=Date.now(),deadline=start+durationSeconds*1000;let completed=0,errors=0;const latency=[],errorSamples=[];
- await Promise.all(Array.from({length:concurrency},async(_,worker)=>{let i=0;while(Date.now()<deadline){const rel=chooseRelationship(worker,i++),t=process.hrtime.bigint();try{
+ const start=Date.now(),deadline=start+durationSeconds*1000;let completed=0,errors=0,hotAttempts=0,otherAttempts=0;const latency=[],errorSamples=[];
+ await Promise.all(Array.from({length:concurrency},async(_,worker)=>{let i=0;while(Date.now()<deadline){const rel=chooseRelationship(worker,i++),t=process.hrtime.bigint();if(rel.id===hotRelationship.id)hotAttempts++;else otherAttempts++;try{
   const amountMinor=1000;
   const charge=await createApprovedOperation(rel,"credit_charge",rel.seller,rel.buyer,{creditorUserId:rel.seller,debtorUserId:rel.buyer,currency:"YER",amountMinor});
   const obligation=await timed("lookup_obligation_id",()=>pool.query("SELECT id FROM ledger.obligations WHERE source_operation_id=$1::uuid",[charge]));
@@ -70,8 +72,8 @@ async function main(){
  }catch(e){errors++;if(errorSamples.length<20)errorSamples.push(String(e));}finally{latency.push(Number(process.hrtime.bigint()-t)/1e6);}}}));
  stop=true;await monitor;
  const after=await snapshot(),actualDurationMs=Date.now()-start,statementDeltas=[];
- if(before.statements&&after.statements){const old=new Map(before.statements.map(x=>[x.queryid,x]));for(const x of after.statements){const b=old.get(x.queryid)||{};statementDeltas.push({queryid:x.queryid,calls:Number(x.calls)-Number(b.calls??0),totalExecTimeMs:Number(x.total_exec_time)-Number(b.total_exec_time??0),rows:Number(x.rows)-Number(b.rows??0),sharedBlksRead:Number(x.shared_blks_read)-Number(b.shared_blks_read??0),sharedBlksHit:Number(x.shared_blks_hit)-Number(b.shared_blks_hit??0),tempBlksWritten:Number(x.temp_blks_written)-Number(b.temp_blks_written??0)});}statementDeltas.sort((a,b)=>b.totalExecTimeMs-a.totalExecTimeMs);}
- const report={...metadata,actualDurationMs,completedLifecycles:completed,errors,errorSamples,throughputPerSecond:Number((completed/(actualDurationMs/1000)).toFixed(3)),fullLifecycleLatencyMs:summarize(latency),stageLatencyMs:Object.fromEntries(Object.entries(stageSamples).map(([k,v])=>[k,summarize(v)])),sampledWaitEvents:waitSamples,sampledLocks:lockSamples,sampledActivity:activitySamples,walDelta:delta(after.wal,before.wal),databaseDelta:delta(after.database,before.database),pgStatStatementsError:after.statementsError,topStatementDeltas:statementDeltas.slice(0,25)};
+ if(before.statements&&after.statements){const old=new Map(before.statements.map(x=>[x.queryid,x]));for(const x of after.statements){const b=old.get(x.queryid)||{};statementDeltas.push({queryid:x.queryid,query:x.query,calls:Number(x.calls)-Number(b.calls??0),totalExecTimeMs:Number(x.total_exec_time)-Number(b.total_exec_time??0),rows:Number(x.rows)-Number(b.rows??0),sharedBlksRead:Number(x.shared_blks_read)-Number(b.shared_blks_read??0),sharedBlksHit:Number(x.shared_blks_hit)-Number(b.shared_blks_hit??0),tempBlksWritten:Number(x.temp_blks_written)-Number(b.temp_blks_written??0)});}statementDeltas.sort((a,b)=>b.totalExecTimeMs-a.totalExecTimeMs);}
+ const report={...metadata,actualDurationMs,completedLifecycles:completed,errors,errorSamples,hotRelationshipAttempts:hotAttempts,otherRelationshipAttempts:otherAttempts,observedHotSharePercent:Number((100*hotAttempts/Math.max(1,hotAttempts+otherAttempts)).toFixed(2)),throughputPerSecond:Number((completed/(actualDurationMs/1000)).toFixed(3)),fullLifecycleLatencyMs:summarize(latency),stageLatencyMs:Object.fromEntries(Object.entries(stageSamples).map(([k,v])=>[k,summarize(v)])),sampledWaitEvents:waitSamples,sampledLocks:lockSamples,sampledActivity:activitySamples,walDelta:delta(after.wal,before.wal),databaseDelta:delta(after.database,before.database),pgStatStatementsError:after.statementsError,blockedByQuery:Object.values(blockedByQuery).sort((a,b)=>b.samples-a.samples),topStatementDeltas:statementDeltas.slice(0,25)};
  console.log("SOAK_RESULT "+JSON.stringify(report));if(errors)throw new Error("soak run had "+errors+" failed lifecycles");
 }
 try{await main();}finally{await Promise.all([pool.end(),monitorPool.end()]);}
