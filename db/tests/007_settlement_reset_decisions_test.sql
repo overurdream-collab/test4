@@ -88,6 +88,15 @@ BEGIN
     RAISE EXCEPTION 'Approved reset did not close relationship';
   END IF;
 
+  -- A delayed retry of the original request remains idempotent after closure.
+  IF ledger.request_settlement_reset(
+       '86000000-0000-0000-0000-000000000001',
+       '16000000-0000-0000-0000-000000000001',
+       '26000000-0000-0000-0000-000000000001'
+     ) <> '86000000-0000-0000-0000-000000000001' THEN
+    RAISE EXCEPTION 'Settlement request retry after closure was not idempotent';
+  END IF;
+
   IF (SELECT count(*) FROM ledger.settlement_decisions
       WHERE request_id='86000000-0000-0000-0000-000000000001') <> 1 THEN
     RAISE EXCEPTION 'Expected exactly one immutable settlement decision';
