@@ -1,7 +1,7 @@
 name: Financial soak full-schema baseline (pre shared-lock optimization)
 
 on:
-  pull_request:
+  workflow_dispatch:
     paths:
       - "server/bench/financial-soak.mjs"
       - ".github/workflows/financial-soak-full-schema-baseline.yml"
