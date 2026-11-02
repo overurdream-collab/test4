@@ -482,8 +482,8 @@ test("creates an idempotent sales-return operation using principal identity only
   assert.deepEqual(JSON.parse(response.body), {
     status: "awaiting_counterparty", operationId: returnKey, serverVersion: 1, serverSequence: 44
   });
-  assert.deepEqual(calls[1].values.slice(0, 5), [returnKey, relationshipId, userId, deviceId, "sales_return"]);
-  assert.equal(calls[1].values[6], JSON.stringify(returnPayload));
+  assert.deepEqual(calls[1]!.values.slice(0, 5), [returnKey, relationshipId, userId, deviceId, "sales_return"]);
+  assert.equal(calls[1]!.values[6], JSON.stringify(returnPayload));
   await app.close();
 });
 
