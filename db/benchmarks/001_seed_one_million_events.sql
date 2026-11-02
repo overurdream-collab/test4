@@ -48,11 +48,17 @@ INSERT INTO ledger.relationship_sync_counters (relationship_id, last_sequence)
 SELECT md5('bench-rel-' || n)::uuid, 1000
 FROM generate_series(1, 1000) AS gs(n);
 
-INSERT INTO ledger.relationship_sync_shard_counters (relationship_id,sync_shard,last_sequence)
-SELECT md5('bench-rel-' || n)::uuid,shard,1000
-FROM generate_series(1,1000) AS gs(n)
-CROSS JOIN generate_series(0,7) AS shards(shard)
-ON CONFLICT(relationship_id,sync_shard) DO UPDATE SET last_sequence=EXCLUDED.last_sequence;
+DO $
+BEGIN
+ IF to_regclass('ledger.relationship_sync_shard_counters') IS NOT NULL THEN
+  INSERT INTO ledger.relationship_sync_shard_counters (relationship_id,sync_shard,last_sequence)
+  SELECT md5('bench-rel-' || n)::uuid,shard,1000
+  FROM generate_series(1,1000) AS gs(n)
+  CROSS JOIN generate_series(0,7) AS shards(shard)
+  ON CONFLICT(relationship_id,sync_shard) DO UPDATE SET last_sequence=EXCLUDED.last_sequence;
+ END IF;
+END;
+$;
 
 INSERT INTO ledger.relationship_events (
   relationship_id, server_sequence, event_id, operation_id, event_type, event_payload
