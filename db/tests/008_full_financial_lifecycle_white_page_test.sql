@@ -191,8 +191,7 @@ SELECT ledger.decide_operation(
  1,'approved','new cycle payment confirmed'
 );
 
-DO $
-BEGIN
+DO $$BEGIN
   BEGIN
     PERFORM * FROM ledger.accept_operation(
       '37000000-0000-0000-0000-000000000005',
@@ -220,7 +219,7 @@ BEGIN
     IF SQLERRM NOT LIKE 'Allocation must stay within one account cycle%' THEN RAISE; END IF;
   END;
 END;
-$;
+$$;
 
 ROLLBACK;
 SELECT 'full financial lifecycle and white-page reset tests passed' AS result;
