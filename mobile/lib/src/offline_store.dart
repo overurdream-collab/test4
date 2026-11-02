@@ -26,6 +26,7 @@ class OfflineOperation {
     this.businessState,
     this.serverVersion,
     this.serverSequence,
+    this.syncShard = 0,
     this.attempts = 0,
   });
 
@@ -39,6 +40,7 @@ class OfflineOperation {
   final String? businessState;
   final int? serverVersion;
   final int? serverSequence;
+  final int syncShard;
   final int attempts;
 
   factory OfflineOperation.fromRow(Map<String, Object?> row) {
