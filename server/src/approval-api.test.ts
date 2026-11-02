@@ -476,14 +476,14 @@ test("creates an idempotent sales-return operation using principal identity only
   });
   const response = await app.inject({
     method: "POST", url: returnUrl, headers: { "idempotency-key": returnKey },
-    payload: { ...returnPayload, actorUserId: "forged-user" }
+    payload: returnPayload
   });
   assert.equal(response.statusCode, 201);
   assert.deepEqual(JSON.parse(response.body), {
     status: "awaiting_counterparty", operationId: returnKey, serverVersion: 1, serverSequence: 44
   });
   assert.deepEqual(calls[1].values.slice(0, 5), [returnKey, relationshipId, userId, deviceId, "sales_return"]);
-  assert.equal(calls[1].values[7], JSON.stringify(returnPayload));
+  assert.equal(calls[1].values[6], JSON.stringify(returnPayload));
   await app.close();
 });
 
@@ -625,5 +625,18 @@ test("counterparty approval maps a return-overrun race to HTTP 409", async () =>
     payload: { decision: "approved", expectedVersion: 1 }
   });
   assert.equal(response.statusCode, 409);
+  await app.close();
+});
+
+test("rejects client-supplied actor identity in sales-return body", async () => {
+  const app = buildApprovalApi({
+    pool: makePool(async () => { throw new Error("schema must reject before query"); }),
+    resolvePrincipal: async () => ({ userId, deviceId })
+  });
+  const response = await app.inject({
+    method: "POST", url: returnUrl, headers: { "idempotency-key": returnKey },
+    payload: { ...returnPayload, actorUserId: "forged-user" }
+  });
+  assert.equal(response.statusCode, 400);
   await app.close();
 });
