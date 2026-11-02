@@ -80,3 +80,23 @@ BEGIN
  jsonb_build_object('operationId',p_operation_id,'operationType',p_operation_type,'businessState','awaiting_counterparty','serverVersion',1,'payload',p_payload));
  RETURN QUERY SELECT 'accepted'::text,p_operation_id,'awaiting_counterparty'::text,1::bigint,n,t;
 END; $$;
+
+-- Reuse the existing approval state transition; this additional trigger posts
+-- the return only when the operation changes to approved.
+CREATE OR REPLACE FUNCTION ledger.materialize_approved_sales_return()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ IF OLD.business_state<>'approved' AND NEW.business_state='approved'
+    AND NEW.operation_type='sales_return' THEN
+  INSERT INTO ledger.sales_returns(id,relationship_id,source_operation_id,original_obligation_id,currency,amount_minor,reason)
+  VALUES(gen_random_uuid(),NEW.relationship_id,NEW.operation_id,
+   (NEW.operation_payload->>'originalObligationId')::uuid,
+   (NEW.operation_payload->>'currency')::char(3),
+   (NEW.operation_payload->>'amountMinor')::bigint,
+   NULLIF(NEW.operation_payload->>'reason',''));
+ END IF;
+ RETURN NEW;
+END; $$;
+CREATE TRIGGER operations_materialize_sales_return
+AFTER UPDATE OF business_state ON ledger.operations
+FOR EACH ROW EXECUTE FUNCTION ledger.materialize_approved_sales_return();
