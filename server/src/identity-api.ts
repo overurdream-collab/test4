@@ -168,33 +168,15 @@ export function buildIdentityApi({
       if (!PHONE.test(phoneE164)) return reply.code(400).send({ error: "invalid_phone" });
       const ipHash = hmac(otpPepper, "ip:" + request.ip);
       try {
-        const [phoneCount, ipCount] = await Promise.all([
-          pool.query<{ count: number }>(
-            "SELECT count(*)::int AS count FROM identity.otp_challenges " +
-            "WHERE phone_e164=$1 AND created_at > now()-interval '15 minutes'",
-            [phoneE164]
-          ),
-          pool.query<{ count: number }>(
-            "SELECT count(*)::int AS count FROM identity.otp_challenges " +
-            "WHERE requested_ip_hash=$1 AND created_at > now()-interval '1 hour'",
-            [ipHash]
-          )
-        ]);
-        if ((phoneCount.rows[0]?.count ?? 0) >= 3 || (ipCount.rows[0]?.count ?? 0) >= 10) {
-          return reply.code(429).send({ error: "otp_rate_limited" });
-        }
-
         const code = randomInt(100000, 1000000).toString();
         const codeHash = hmac(otpPepper, "login:" + phoneE164 + ":" + code);
         const expiresAt = new Date(now() + 5 * 60 * 1000);
-        const challenge = await pool.query<{ id: string }>(
-          "INSERT INTO identity.otp_challenges " +
-          "(phone_e164,code_hash,requested_ip_hash,status,expires_at) " +
-          "VALUES ($1,$2,$3,'pending',$4) RETURNING id",
+        const challenge = await pool.query<{ challenge_id: string | null }>(
+          "SELECT identity.create_otp_challenge($1,$2,$3,$4) AS challenge_id",
           [phoneE164, codeHash, ipHash, expiresAt]
         );
-        const challengeId = challenge.rows[0]?.id;
-        if (!challengeId) return reply.code(500).send({ error: "internal_error" });
+        const challengeId = challenge.rows[0]?.challenge_id;
+        if (!challengeId) return reply.code(429).send({ error: "otp_rate_limited" });
         try {
           await otpDelivery.sendCode(phoneE164, code, expiresAt);
           await pool.query(
