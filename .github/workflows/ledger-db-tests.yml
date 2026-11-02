@@ -116,3 +116,8 @@ jobs:
         env:
           PGPASSWORD: ledger_test
         run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/tests/009_sales_returns_credit_balances_test.sql
+
+      - name: Run unpaid and fully paid sales return matrix
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/tests/010_sales_return_payment_state_matrix_test.sql
