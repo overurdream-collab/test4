@@ -210,3 +210,27 @@ GET /v1/relationships/{relationshipId}/account-cycles يعيد الدورة ال
 - `partyBalanceMinor` = `receivableMinor - payableMinor` لكل مالك حساب/عملة/دورة.
 - الموجب: له، والسالب: عليه/رصيد لصالح الطرف المقابل. الطرفان يظهران بإشارتين متعاكستين.
 - لا يدخل في الحساب أصل الدفعة غير المخصصة أو التزامها؛ تظل القيم الأربع التفصيلية موجودة ولا يجري إخفاء الدين بدفعة غير مخصصة.
+
+
+## 2026-11-02 — واجهة HTTP للمرتجعات (PR #36)
+
+### المسارات
+- `POST /v1/relationships/{relationshipId}/sales-returns`
+  - Header إلزامي: `idempotency-key` بصيغة UUID.
+  - Body: `originalObligationId`, `currency`, `amountMinor` كنص صحيح موجب، و`reason` اختياري.
+  - هوية المنشئ والجهاز من `AuthenticatedPrincipal` فقط؛ لا يقبل body حقول actor.
+  - يفحص العضوية النشطة، وأن دورة الالتزام الأصلية هي الدورة الحالية، وأن قيمة المرتجع لا تتجاوز المتبقي من الالتزام.
+  - يمرر العملية إلى `ledger.accept_operation` كنوع `sales_return`، وتظل `awaiting_counterparty` حتى القرار.
+- `POST /v1/relationships/{relationshipId}/operations/{operationId}/decision`
+  - مسار الموافقة الحالي هو نفسه لمسار المرتجع؛ `ledger.decide_operation` يفرض اختلاف المنشئ عن المعتمد وعضوية نشطة بصلاحية `can_approve`.
+  - قيد migration 009 يعيد التحقق من الحد التراكمي عند نشر المرتجع داخل معاملة الموافقة؛ تعارض الحد يعاد HTTP 409.
+- `GET /v1/relationships/{relationshipId}/account-cycles/{cycleId}/sales-returns`
+  - كشف الدورة يعيد المبلغ والعملة والسبب وتاريخ الإنشاء والالتزام الأصلي وقيمته وأطرافه وحالة العملية وقرار الموافقة.
+  - لا يُكشف إلا لعضو نشط، مع 403 لغير العضو و404 لدورة غير موجودة.
+- `PATCH /v1/relationships/{relationshipId}/sales-returns/{returnId}`
+  - يرفض تعديل سجل مرتجع منشور بـ HTTP 409؛ التصحيح يكون بقيد/عملية عكسية جديدة ولا يعدل السجل الأصلي.
+
+### الاختبارات
+أضيفت اختبارات HTTP للإنشاء، idempotency، principal-only identity، مفتاح التكرار الإلزامي، تجاوز المبلغ، الدورة المؤرشفة، كشف التفاصيل وعزل العضوية، منع التعديل، منع الموافقة الذاتية، وتعارض تجاوز الحد وقت الاعتماد.
+
+**الحالة:** PR #36 مفتوح وينتظر نتائج Approval API checks وPostgreSQL CI. لم يتم الدمج أو النشر، ولم تتغير قاعدة إنتاجية.
