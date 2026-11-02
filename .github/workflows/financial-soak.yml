@@ -79,7 +79,9 @@ jobs:
           SOAK_WORKERS: "50"
           SOAK_SCENARIO: "${{ matrix.scenario }}"
           SOAK_REPEAT: "${{ matrix.repeat }}"
-        run: node bench/financial-soak.mjs | tee financial-soak-result.jsonl
+        run: |
+          set -o pipefail
+          node bench/financial-soak.mjs | tee financial-soak-summary.log
       - name: Capture final PostgreSQL health
         if: always()
         env:
@@ -93,7 +95,8 @@ jobs:
         with:
           name: soak-${{ matrix.scenario }}-${{ matrix.duration }}s-repeat-${{ matrix.repeat }}
           path: |
-            server/financial-soak-result.jsonl
+            server/financial-soak-result.json
+            server/financial-soak-summary.log
             runner-resources.txt
             postgres-final-health.txt
             postgres-container.log

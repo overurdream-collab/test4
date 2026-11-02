@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { writeFileSync } from "node:fs";
 import pg from "pg";
 const { Pool } = pg;
 const durationSeconds = Number(process.env.SOAK_DURATION_SECONDS ?? 60);
@@ -9,7 +10,7 @@ const repeat = Number(process.env.SOAK_REPEAT ?? 1);
 if (![60, 300].includes(durationSeconds)) throw new Error("SOAK_DURATION_SECONDS must be 60 or 300");
 if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 50) throw new Error("SOAK_WORKERS must be 1..50");
 if (!["hot", "uniform"].includes(scenario)) throw new Error("SOAK_SCENARIO must be hot or uniform");
-const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: concurrency + 2, idleTimeoutMillis: 10000, connectionTimeoutMillis: 10000, application_name: "ledger-financial-soak" });
+const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: concurrency + 2, idleTimeoutMillis: 10000, connectionTimeoutMillis: 10000, application_name: "ledger-financial-soak", options: "-c statement_timeout=30000 -c lock_timeout=15000" });
 const monitorPool = new Pool({ connectionString: process.env.DATABASE_URL, max: 2, application_name: "ledger-soak-monitor" });
 function uuidFromMd5(value) { const h=createHash("md5").update(value).digest("hex"); return h.slice(0,8)+"-"+h.slice(8,12)+"-"+h.slice(12,16)+"-"+h.slice(16,20)+"-"+h.slice(20); }
 function percentile(sorted,p) { return sorted.length ? Number(sorted[Math.min(sorted.length-1,Math.floor((sorted.length-1)*p))].toFixed(2)) : null; }
@@ -58,7 +59,7 @@ async function main(){
   for(const x of waits.rows){const k=[x.wait_type,x.wait_event,x.state].join("|");waitSamples[k]=(waitSamples[k]??0)+x.sessions;}
   for(const x of locks.rows){const k=[x.locktype,x.mode,x.granted].join("|");lockSamples[k]=(lockSamples[k]??0)+x.lock_count;}
   for(const x of blocked.rows){const k=[x.queryid,x.wait_event].join("|");const prior=blockedByQuery[k]??{queryid:x.queryid,waitEvent:x.wait_event,samples:0,query:x.query};prior.samples+=x.samples;blockedByQuery[k]=prior;} for(const x of blockers.rows){const k=[x.blocked_pid,x.blocker_pid,x.locktype,x.relation_name,x.transaction_id].join("|");const prior=blockingPairs[k]??{...x,samples:0};prior.samples++;blockingPairs[k]=prior;}
-  activitySamples.push({at:new Date().toISOString(),groups:activity.rows});
+  if(activitySamples.length<60) activitySamples.push({at:new Date().toISOString(),groups:activity.rows});
  }catch(e){process.stderr.write("monitor sample failed: "+String(e)+"\n");}await new Promise(r=>setTimeout(r,500));}})();
  const start=Date.now(),deadline=start+durationSeconds*1000;let completed=0,errors=0,hotAttempts=0,otherAttempts=0;const latency=[],errorSamples=[];
  await Promise.all(Array.from({length:concurrency},async(_,worker)=>{let i=0;while(Date.now()<deadline){const rel=chooseRelationship(worker,i++),t=process.hrtime.bigint();if(rel.id===hotRelationship.id)hotAttempts++;else otherAttempts++;try{
@@ -75,6 +76,6 @@ async function main(){
  const after=await snapshot(),actualDurationMs=Date.now()-start,statementDeltas=[];
  if(before.statements&&after.statements){const old=new Map(before.statements.map(x=>[x.queryid,x]));for(const x of after.statements){const b=old.get(x.queryid)||{};statementDeltas.push({queryid:x.queryid,query:x.query,calls:Number(x.calls)-Number(b.calls??0),totalExecTimeMs:Number(x.total_exec_time)-Number(b.total_exec_time??0),rows:Number(x.rows)-Number(b.rows??0),sharedBlksRead:Number(x.shared_blks_read)-Number(b.shared_blks_read??0),sharedBlksHit:Number(x.shared_blks_hit)-Number(b.shared_blks_hit??0),tempBlksWritten:Number(x.temp_blks_written)-Number(b.temp_blks_written??0)});}statementDeltas.sort((a,b)=>b.totalExecTimeMs-a.totalExecTimeMs);}
  const report={...metadata,actualDurationMs,completedLifecycles:completed,errors,errorSamples,hotRelationshipAttempts:hotAttempts,otherRelationshipAttempts:otherAttempts,observedHotSharePercent:Number((100*hotAttempts/Math.max(1,hotAttempts+otherAttempts)).toFixed(2)),throughputPerSecond:Number((completed/(actualDurationMs/1000)).toFixed(3)),fullLifecycleLatencyMs:summarize(latency),stageLatencyMs:Object.fromEntries(Object.entries(stageSamples).map(([k,v])=>[k,summarize(v)])),sampledWaitEvents:waitSamples,sampledLocks:lockSamples,sampledActivity:activitySamples,walDelta:delta(after.wal,before.wal),databaseDelta:delta(after.database,before.database),pgStatStatementsError:after.statementsError,blockedByQuery:Object.values(blockedByQuery).sort((a,b)=>b.samples-a.samples),blockingPairs:Object.values(blockingPairs).sort((a,b)=>b.samples-a.samples).slice(0,100),topStatementDeltas:statementDeltas.slice(0,25)};
- console.log("SOAK_RESULT "+JSON.stringify(report));if(errors)throw new Error("soak run had "+errors+" failed lifecycles");
+ const serialized=JSON.stringify(report);writeFileSync("financial-soak-result.json",serialized+"\\n");console.log("SOAK_SUMMARY "+JSON.stringify({scenario,repeat,targetDurationSeconds:durationSeconds,actualDurationMs,completedLifecycles:completed,throughputPerSecond:report.throughputPerSecond,latency:report.fullLifecycleLatencyMs,errors,observedHotSharePercent:report.observedHotSharePercent,deadlocks:report.databaseDelta.deadlocks,topWaits:report.sampledWaitEvents,topBlockers:report.blockingPairs.slice(0,5)}));if(errors)throw new Error("soak run had "+errors+" failed lifecycles");
 }
 try{await main();}finally{await Promise.all([pool.end(),monitorPool.end()]);}

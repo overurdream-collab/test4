@@ -36,3 +36,31 @@ BEGIN
   RETURN NEW;
 END;
 $$;
+
+-- The bilateral-membership guard is also on every operation insert. It must
+-- participate in the same shared-lock protocol; leaving FOR UPDATE here creates
+-- an upgrade deadlock after the two other triggers acquired FOR SHARE.
+CREATE OR REPLACE FUNCTION ledger.require_two_active_members_for_operations()
+RETURNS trigger LANGUAGE plpgsql AS $operation_bilateral$
+DECLARE rel_status text; active_count bigint;
+BEGIN
+  SELECT status INTO rel_status
+  FROM ledger.relationships
+  WHERE id = NEW.relationship_id
+  FOR SHARE;
+
+  IF NOT FOUND OR rel_status <> 'active' THEN
+    RAISE EXCEPTION 'Relationship is not active' USING ERRCODE = '55000';
+  END IF;
+
+  SELECT count(*) INTO active_count
+  FROM ledger.relationship_members
+  WHERE relationship_id = NEW.relationship_id AND status = 'active';
+
+  IF active_count <> 2 THEN
+    RAISE EXCEPTION 'Financial operations require exactly two active parties'
+      USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END;
+$operation_bilateral$;
