@@ -1,6 +1,6 @@
 # مخطط قاعدة البيانات ERD — الدفتر التجاري المشترك
 
-**الحالة:** مخطط as-built لـ ledger migrations 001–009، وidentity migration 010 موضح في القسم 6؛ لا يخلط الجداول المنفذة بالكيانات المستقبلية.  
+**الحالة:** مخطط as-built لـ ledger migrations 001–009 وidentity migration 010 وrelationship migration 011؛ لا يخلط الجداول المنفذة بالكيانات المستقبلية.  
 **المراجعة:** 2026-11-02 | **قاعدة الاختبار:** PostgreSQL 16، CI Run #131.
 
 > معرفات المستخدمين خارجية في هذه النسخة؛ لا يوجد جدول users ضمن schema ledger. الرسم يعرض الجداول الفعلية فقط.
@@ -309,3 +309,60 @@ erDiagram
 - لا يوجد مزود SMS فعلي أو refresh token؛ لا تعتبر وجود OTP adapter مصادقة إنتاجية مكتملة.
 
 
+
+
+## 7. مخطط العلاقات والدعوات — migration 011
+
+```mermaid
+erDiagram
+ RELATIONSHIPS ||--o| RELATIONSHIP_INVITATIONS : invitation
+ IDENTITY_USERS ||--o{ RELATIONSHIP_INVITATIONS : inviter
+ IDENTITY_USERS o|--o{ RELATIONSHIP_INVITATIONS : invitee
+ RELATIONSHIP_INVITATIONS ||--o{ RELATIONSHIP_INVITATION_EVENTS : audit
+ RELATIONSHIPS ||--o{ RELATIONSHIP_INVITATION_EVENTS : history
+ IDENTITY_USERS o|--o{ RELATIONSHIP_INVITATION_EVENTS : actor
+ RELATIONSHIPS {
+  uuid id PK
+  text status
+  text relationship_type
+  uuid created_by_user_id FK
+  uuid current_cycle_id FK
+ }
+ RELATIONSHIP_INVITATIONS {
+  uuid id PK
+  uuid relationship_id FK,UK
+  uuid inviter_user_id FK
+  uuid invitee_user_id FK
+  text invitee_phone_e164
+  text relationship_type
+  text inviter_role
+  text invitee_role
+  bytea request_hash
+  text status
+  uuid decision_id UK
+  timestamptz expires_at
+  timestamptz responded_at
+  uuid responded_by_user_id FK
+ }
+ RELATIONSHIP_INVITATION_EVENTS {
+  uuid id PK
+  uuid invitation_id FK
+  uuid relationship_id FK
+  uuid actor_user_id FK
+  text event_type
+  jsonb event_payload
+  timestamptz created_at
+ }
+```
+
+| الجدول | المسؤولية |
+|---|---|
+| ledger.relationship_invitations | طلب ربط واحد لعلاقة v1، مرتبط بالهاتف الموثق، مع idempotency وقرار القبول/الرفض |
+| ledger.relationship_invitation_events | سجل أحداث غير قابل للتعديل/الحذف لإنشاء الدعوة والقبول والرفض والانتهاء |
+
+### قيود العلاقة الجديدة
+- تنشأ العلاقة بحالة `suspended` وبطرف نشط واحد؛ لا تقبل عمليات مالية.
+- قبول الدعوة يتطلب حسابًا نشطًا ورقم هاتف موثقًا يطابق رقم المدعو، ثم تصبح العلاقة `active` بطرفين نشطين.
+- الرفض أو انتهاء الدعوة يغلق العلاقة المعلقة.
+- migration 011 يمنع أكثر من طرفين نشطين ويمنع إدخال عملية مالية ما لم يوجد طرفان نشطان.
+- لم يضف FK مباشرًا من `ledger.relationship_members.user_id` إلى `identity.users.id` للحفاظ على معرفات السجلات القديمة؛ دالة إنشاء العلاقة تتحقق من الهوية قبل إنشاء العضوية الجديدة.
