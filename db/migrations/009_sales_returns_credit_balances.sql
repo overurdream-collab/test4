@@ -42,3 +42,41 @@ END; $$;
 CREATE TRIGGER sales_returns_post_to_journal AFTER INSERT ON ledger.sales_returns FOR EACH ROW EXECUTE FUNCTION ledger.post_sales_return_to_journal();
 
 -- Sales returns are posted only after the normal bilateral approval transition.
+
+-- Permit the new approved return operation through the same durable inbox.
+CREATE OR REPLACE FUNCTION ledger.accept_operation(
+ p_operation_id uuid,p_relationship_id uuid,p_actor_user_id uuid,p_device_id uuid,
+ p_operation_type text,p_request_hash bytea,p_payload jsonb,p_base_version bigint,
+ p_schema_version integer,p_client_created_at timestamptz
+) RETURNS TABLE(outcome text,canonical_operation_id uuid,business_state text,
+ server_version bigint,server_sequence bigint,server_created_at timestamptz)
+LANGUAGE plpgsql AS $$
+DECLARE x ledger.operations%ROWTYPE; n bigint; t timestamptz:=clock_timestamp();
+BEGIN
+ IF p_request_hash IS NULL OR octet_length(p_request_hash)<>32 OR p_payload IS NULL
+ OR jsonb_typeof(p_payload)<>'object' OR p_base_version<0 OR p_schema_version<>1
+ OR p_operation_type NOT IN ('credit_charge','payment','allocation','supply','sales_return') THEN
+  RAISE EXCEPTION 'Invalid operation envelope' USING ERRCODE='23514';
+ END IF;
+ PERFORM pg_advisory_xact_lock(hashtextextended(p_operation_id::text,0));
+ SELECT * INTO x FROM ledger.operations WHERE operation_id=p_operation_id FOR UPDATE;
+ IF FOUND THEN
+  IF x.relationship_id=p_relationship_id AND x.actor_user_id=p_actor_user_id
+   AND x.device_id=p_device_id AND x.operation_type=p_operation_type AND x.request_hash=p_request_hash THEN
+   RETURN QUERY SELECT 'already_processed'::text,x.operation_id,x.business_state,x.server_version,x.server_sequence,x.created_at; RETURN;
+  END IF;
+  RAISE EXCEPTION 'Operation id reused with different envelope' USING ERRCODE='23505';
+ END IF;
+ IF NOT EXISTS(SELECT 1 FROM ledger.relationship_members WHERE relationship_id=p_relationship_id AND user_id=p_actor_user_id AND status='active') THEN
+  RAISE EXCEPTION 'Actor is not an active relationship member' USING ERRCODE='42501';
+ END IF;
+ n:=ledger.next_relationship_sequence(p_relationship_id);
+ INSERT INTO ledger.operations(operation_id,relationship_id,actor_user_id,operation_type,request_hash,business_state,
+ base_version,server_version,device_id,client_schema_version,client_created_at,operation_payload,server_sequence,created_at)
+ VALUES(p_operation_id,p_relationship_id,p_actor_user_id,p_operation_type,p_request_hash,'awaiting_counterparty',
+ p_base_version,1,p_device_id,p_schema_version,p_client_created_at,p_payload,n,t);
+ INSERT INTO ledger.relationship_events(relationship_id,server_sequence,event_id,operation_id,event_type,event_payload)
+ VALUES(p_relationship_id,n,gen_random_uuid(),p_operation_id,'operation.created',
+ jsonb_build_object('operationId',p_operation_id,'operationType',p_operation_type,'businessState','awaiting_counterparty','serverVersion',1,'payload',p_payload));
+ RETURN QUERY SELECT 'accepted'::text,p_operation_id,'awaiting_counterparty'::text,1::bigint,n,t;
+END; $$;
