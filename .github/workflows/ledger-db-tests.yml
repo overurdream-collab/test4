@@ -6,6 +6,7 @@ on:
       - "db/migrations/**"
       - "db/tests/**"
       - "docs/**"
+      - "server/**"
       - ".github/workflows/ledger-db-tests.yml"
   push:
     branches:
@@ -34,6 +35,19 @@ jobs:
           --health-retries 10
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install server dependencies
+        working-directory: server
+        run: npm install --no-audit --no-fund
+      - name: Typecheck server
+        working-directory: server
+        run: npm run typecheck
+      - name: Run server API tests
+        working-directory: server
+        run: npm test
       - name: Apply prototype migration
         env:
           PGPASSWORD: ledger_test
