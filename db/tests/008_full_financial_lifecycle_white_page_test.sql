@@ -59,7 +59,7 @@ WHERE r.id='17000000-0000-0000-0000-000000000001';
 
 -- Before allocation, do not net an unpaid obligation against an unapplied payment.
 -- Keep the four account classes distinct in the cycle-balance API contract.
-DO $
+DO $balance_before_allocation$
 DECLARE creditor_receivable numeric; creditor_unapplied_liability numeric;
         debtor_payable numeric; debtor_unapplied_asset numeric; cycle_now uuid;
 BEGIN
@@ -90,7 +90,7 @@ BEGIN
       creditor_receivable,creditor_unapplied_liability,debtor_payable,debtor_unapplied_asset;
   END IF;
 END;
-$;
+$balance_before_allocation$;
 
 -- 3) Allocate the entire payment to the obligation and approve the allocation.
 SELECT * FROM ledger.accept_operation(
@@ -114,7 +114,7 @@ SELECT ledger.decide_operation(
  1,'approved','full lifecycle allocation approved'
 );
 
-DO $
+DO $balance_after_allocation$
 DECLARE nonzero_classes bigint; cycle_now uuid;
 BEGIN
   SELECT old_cycle_id INTO cycle_now FROM lifecycle_ids;
