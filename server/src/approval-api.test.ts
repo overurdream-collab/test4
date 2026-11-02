@@ -146,3 +146,99 @@ test("rejects unauthenticated settlement reset requests before calling PostgreSQ
   assert.equal(called, false);
   await app.close();
 });
+
+
+const settlementDecisionUrl = settlementUrl + "/" + decisionId + "/decision";
+const pendingSettlementUrl = settlementUrl + "/pending";
+
+test("returns the pending settlement request to an authorized relationship member", async () => {
+  const requestedAt = "2026-11-02T10:00:00.000Z";
+  const app = buildApprovalApi({
+    pool: makePool(async () => ({
+      rows: [{
+        authorized: true,
+        request_id: decisionId,
+        requested_by_user_id: "21000000-0000-0000-0000-000000000001",
+        requested_at: requestedAt
+      }]
+    })),
+    resolvePrincipal: async () => ({ userId, deviceId })
+  });
+  const response = await app.inject({ method: "GET", url: pendingSettlementUrl });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(JSON.parse(response.body), {
+    request: {
+      requestId: decisionId,
+      requestedByUserId: "21000000-0000-0000-0000-000000000001",
+      requestedAt
+    }
+  });
+  await app.close();
+});
+
+test("decides a settlement reset using the authenticated counterparty and idempotency key", async () => {
+  let values: unknown[] = [];
+  const app = buildApprovalApi({
+    pool: makePool(async (_sql, bound) => {
+      values = bound;
+      return { rows: [{ decision: "approved" }] };
+    }),
+    resolvePrincipal: async () => ({ userId, deviceId })
+  });
+  const response = await app.inject({
+    method: "POST",
+    url: settlementDecisionUrl,
+    headers: { "idempotency-key": "96000000-0000-0000-0000-000000000002" },
+    payload: { decision: "approved", reason: "Settled by both parties" }
+  });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(JSON.parse(response.body), {
+    status: "decided",
+    requestId: decisionId,
+    decision: "approved",
+    relationshipStatus: "closed"
+  });
+  assert.deepEqual(values, [
+    "96000000-0000-0000-0000-000000000002",
+    relationshipId,
+    decisionId,
+    userId,
+    "approved",
+    "Settled by both parties"
+  ]);
+  await app.close();
+});
+
+test("maps self-approval and missing counterparty permission to 403", async () => {
+  const app = buildApprovalApi({
+    pool: makePool(async () => {
+      throw Object.assign(new Error("requester cannot decide"), { code: "42501" });
+    }),
+    resolvePrincipal: async () => ({ userId, deviceId })
+  });
+  const response = await app.inject({
+    method: "POST", url: settlementDecisionUrl,
+    headers: { "idempotency-key": "96000000-0000-0000-0000-000000000003" },
+    payload: { decision: "approved" }
+  });
+  assert.equal(response.statusCode, 403);
+  assert.deepEqual(JSON.parse(response.body), { error: "forbidden" });
+  await app.close();
+});
+
+test("returns a conflict when the ledger is no longer settled at final approval", async () => {
+  const app = buildApprovalApi({
+    pool: makePool(async () => {
+      throw Object.assign(new Error("outstanding obligation"), { code: "23514" });
+    }),
+    resolvePrincipal: async () => ({ userId, deviceId })
+  });
+  const response = await app.inject({
+    method: "POST", url: settlementDecisionUrl,
+    headers: { "idempotency-key": "96000000-0000-0000-0000-000000000004" },
+    payload: { decision: "approved" }
+  });
+  assert.equal(response.statusCode, 409);
+  assert.deepEqual(JSON.parse(response.body), { error: "settlement_not_complete" });
+  await app.close();
+});
