@@ -86,7 +86,7 @@ async function readTopStatements() {
     "shared_blks_hit::bigint AS shared_blks_hit, shared_blks_read::bigint AS shared_blks_read, " +
     "temp_blks_written::bigint AS temp_blks_written, left(query,240) AS query " +
     "FROM pg_stat_statements WHERE dbid=(SELECT oid FROM pg_database WHERE datname=current_database()) " +
-    "AND query ILIKE '%ledger.%' ORDER BY total_exec_time DESC LIMIT 20"
+    "AND query NOT ILIKE '%pg_stat_statements%' AND query ILIKE '%ledger.%' ORDER BY total_exec_time DESC LIMIT 20"
   );
   return result.rows;
 }
@@ -116,7 +116,7 @@ async function snapshot() {
   let statements = null;
   let statementsError = null;
   try {
-    const result = await monitorPool.query("SELECT COALESCE(sum(calls),0)::bigint AS calls, COALESCE(sum(total_exec_time),0)::numeric AS total_exec_time_ms, COALESCE(sum(shared_blks_hit),0)::bigint AS shared_blks_hit, COALESCE(sum(shared_blks_read),0)::bigint AS shared_blks_read, COALESCE(sum(temp_blks_written),0)::bigint AS temp_blks_written FROM pg_stat_statements WHERE dbid=(SELECT oid FROM pg_database WHERE datname=current_database()) AND query ILIKE '%ledger.%'");
+    const result = await monitorPool.query("SELECT COALESCE(sum(calls),0)::bigint AS calls, COALESCE(sum(total_exec_time),0)::numeric AS total_exec_time_ms, COALESCE(sum(shared_blks_hit),0)::bigint AS shared_blks_hit, COALESCE(sum(shared_blks_read),0)::bigint AS shared_blks_read, COALESCE(sum(temp_blks_written),0)::bigint AS temp_blks_written FROM pg_stat_statements WHERE dbid=(SELECT oid FROM pg_database WHERE datname=current_database()) AND query NOT ILIKE '%pg_stat_statements%' AND query ILIKE '%ledger.%'");
     statements = result.rows[0];
   } catch (error) {
     statementsError = String(error);
