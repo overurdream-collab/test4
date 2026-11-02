@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createHash } from "node:crypto";
 import type { Pool } from "pg";
 import { buildApprovalApi } from "./approval-api.js";
 
@@ -463,7 +464,8 @@ test("creates an idempotent sales-return operation using principal identity only
   const app = buildApprovalApi({
     pool: makePool(async (sql, values) => {
       calls.push({ sql: String(sql), values: values ?? [] });
-      if (calls.length === 1) return { rows: [{
+      if (calls.length === 1) return { rows: [] };
+      if (calls.length === 2) return { rows: [{
         authorized: true, obligation_id: obligationId, amount_minor: "10000",
         returned_minor: "1000", cycle_status: "active", source_cycle_id: cycleId, current_cycle_id: cycleId
       }] };
@@ -482,32 +484,34 @@ test("creates an idempotent sales-return operation using principal identity only
   assert.deepEqual(JSON.parse(response.body), {
     status: "awaiting_counterparty", operationId: returnKey, serverVersion: 1, serverSequence: 44
   });
-  assert.deepEqual(calls[1]!.values.slice(0, 5), [returnKey, relationshipId, userId, deviceId, "sales_return"]);
-  assert.equal(calls[1]!.values[6], JSON.stringify(returnPayload));
+  assert.deepEqual(calls[2]!.values.slice(0, 5), [returnKey, relationshipId, userId, deviceId, "sales_return"]);
+  assert.equal(calls[2]!.values[6], JSON.stringify(returnPayload));
   await app.close();
 });
 
-test("replays the same sales-return idempotency key without creating another operation", async () => {
+test("replays an already approved sales return before checking the remaining obligation", async () => {
   let acceptCalls = 0;
+  const requestHash = createHash("sha256").update(JSON.stringify(returnPayload)).digest();
   const app = buildApprovalApi({
     pool: makePool(async (sql) => {
-      if (String(sql).includes("ledger.accept_operation")) {
-        acceptCalls++;
+      if (String(sql).includes("FROM ledger.operations WHERE operation_id")) {
         return { rows: [{
-          outcome: "already_processed", canonical_operation_id: returnKey, business_state: "awaiting_counterparty",
-          server_version: 1, server_sequence: 44
+          relationship_id: relationshipId, actor_user_id: userId, device_id: deviceId,
+          operation_type: "sales_return", request_hash: requestHash, business_state: "approved",
+          server_version: 2, server_sequence: 44
         }] };
       }
-      return { rows: [{
-        authorized: true, obligation_id: obligationId, amount_minor: "10000", returned_minor: "1000",
-        cycle_status: "active", source_cycle_id: cycleId, current_cycle_id: cycleId
-      }] };
+      acceptCalls++;
+      return { rows: [] };
     }),
     resolvePrincipal: async () => ({ userId, deviceId })
   });
   const response = await app.inject({ method: "POST", url: returnUrl, headers: { "idempotency-key": returnKey }, payload: returnPayload });
   assert.equal(response.statusCode, 200);
-  assert.equal(acceptCalls, 1);
+  assert.deepEqual(JSON.parse(response.body), {
+    status: "approved", operationId: returnKey, serverVersion: 2, serverSequence: 44
+  });
+  assert.equal(acceptCalls, 0);
   await app.close();
 });
 
@@ -654,5 +658,24 @@ test("ignores client-supplied actor identity and binds only the authenticated pr
   assert.equal(acceptedValues[2], userId);
   assert.notEqual(acceptedValues[2], "forged-user");
   assert.equal(acceptedValues[3], deviceId);
+  await app.close();
+});
+
+test("rejects reuse of a sales-return idempotency key with different payload", async () => {
+  const requestHash = createHash("sha256").update(JSON.stringify(returnPayload)).digest();
+  const app = buildApprovalApi({
+    pool: makePool(async () => ({ rows: [{
+      relationship_id: relationshipId, actor_user_id: userId, device_id: deviceId,
+      operation_type: "sales_return", request_hash: requestHash, business_state: "approved",
+      server_version: 2, server_sequence: 44
+    }] })),
+    resolvePrincipal: async () => ({ userId, deviceId })
+  });
+  const response = await app.inject({
+    method: "POST", url: returnUrl, headers: { "idempotency-key": returnKey },
+    payload: { ...returnPayload, amountMinor: "2600" }
+  });
+  assert.equal(response.statusCode, 409);
+  assert.deepEqual(JSON.parse(response.body), { error: "idempotency_conflict" });
   await app.close();
 });
