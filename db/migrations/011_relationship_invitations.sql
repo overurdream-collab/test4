@@ -102,7 +102,7 @@ CREATE OR REPLACE FUNCTION ledger.create_relationship_invitation(
   p_invitee_phone_e164 text,p_relationship_type text,
   p_inviter_role text,p_invitee_role text,p_request_hash bytea,
   p_expires_at timestamptz
-) RETURNS TABLE(invitation_id uuid,relationship_id uuid,status text)
+) RETURNS TABLE(invitation_id uuid,relationship_id uuid,status text,expires_at timestamptz,created boolean)
 LANGUAGE plpgsql AS $create_relationship$
 DECLARE existing ledger.relationship_invitations%ROWTYPE; invitee_id uuid;
 BEGIN
@@ -116,7 +116,7 @@ BEGIN
     IF existing.inviter_user_id=p_inviter_user_id AND existing.invitee_phone_e164=p_invitee_phone_e164
        AND existing.relationship_type=p_relationship_type AND existing.inviter_role=p_inviter_role
        AND existing.invitee_role=p_invitee_role AND existing.request_hash=p_request_hash THEN
-      RETURN QUERY SELECT existing.id,existing.relationship_id,existing.status;
+      RETURN QUERY SELECT existing.id,existing.relationship_id,existing.status,existing.expires_at,false;
       RETURN;
     END IF;
     RAISE EXCEPTION 'Invitation id reused with different content' USING ERRCODE='23505';
@@ -163,7 +163,7 @@ BEGIN
   ) VALUES (p_invitation_id,p_relationship_id,p_inviter_user_id,'created',
     jsonb_build_object('inviteePhoneE164',p_invitee_phone_e164,'relationshipType',p_relationship_type,
       'inviterRole',p_inviter_role,'inviteeRole',p_invitee_role,'expiresAt',p_expires_at));
-  RETURN QUERY SELECT p_invitation_id,p_relationship_id,'pending'::text;
+  RETURN QUERY SELECT p_invitation_id,p_relationship_id,'pending'::text,p_expires_at,true;
 END;
 $create_relationship$;
 
@@ -187,6 +187,9 @@ BEGIN
   END IF;
   IF invite.status<>'pending' THEN
     RAISE EXCEPTION 'Invitation is not pending' USING ERRCODE='55000';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM identity.users u WHERE u.id=p_actor_user_id AND u.status='active') THEN
+    RAISE EXCEPTION 'Invitee account is not active' USING ERRCODE='42501';
   END IF;
   IF p_actor_user_id=invite.inviter_user_id OR NOT EXISTS (
     SELECT 1 FROM identity.phone_identities
