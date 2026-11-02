@@ -6,7 +6,7 @@ VALUES ('15000000-0000-0000-0000-000000000001', 'active');
 INSERT INTO ledger.relationship_members
   (relationship_id, user_id, role_label, status, can_approve)
 VALUES
- ('15000000-0000-0000-0000-000000000001','25000000-0000-0000-0000-000000000001','seller','active',false),
+ ('15000000-0000-0000-0000-000000000001','25000000-0000-0000-0000-000000000001','seller','active',true),
  ('15000000-0000-0000-0000-000000000001','25000000-0000-0000-0000-000000000002','buyer','active',true);
 
 SELECT * FROM ledger.accept_operation(
