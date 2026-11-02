@@ -1,6 +1,6 @@
 # Ledger and Offline Synchronization Specification
 
-**Status:** Conceptual target proposal; not the as-built SQL schema. For the exact PostgreSQL ERD and implementation-aligned financial rules, use `docs/DATABASE_ERD_AR.md` and `docs/LEDGER_FINANCIAL_SPEC_AR.md`. Do not treat proposed entities in this document as implemented tables.
+**Status:** Approved v1.0 design contract for ledger/sync behavior; this is not a claim that every protocol component is implemented. It is not the as-built SQL schema. For the exact PostgreSQL ERD and implementation-aligned financial rules, use `docs/DATABASE_ERD_AR.md` and `docs/LEDGER_FINANCIAL_SPEC_AR.md`. Do not treat proposed entities in this document as implemented tables.
 **Date:** 2026-11-02
 **Branch:** `design/ledger-and-sync-spec`
 **Depends on:** `docs/PROJECT_FOUNDATION.md`
@@ -310,7 +310,7 @@ These are recommendations to validate, not silently finalized product policy:
 6. Preserve all local queued operations across app restarts and never change operation IDs on retry.
 7. Do not implement subscription expiry, automatic exchange rates, or multi-party allocation in the first prototype.
 
-## 15. Relationship to the implemented schema\n\nThe conceptual schema in Section 10 is a target model, not a list of tables already deployed. The as-built database is defined by migrations 001–008. Its exact entity relationships are documented in `docs/DATABASE_ERD_AR.md`; implemented posting behavior and explicit gaps are documented in `docs/LEDGER_FINANCIAL_SPEC_AR.md`. In particular, user/device/attachment/audit/idempotency-record entities in the conceptual proposal must not be mistaken for PostgreSQL tables in the current ledger schema.\n\n## 16. Worklog
+## 15. Relationship to the implemented schema\n\nThe conceptual schema in Section 10 is a target model, not a list of tables already deployed. The as-built database is defined by migrations 001–009. Its exact entity relationships are documented in `docs/DATABASE_ERD_AR.md`; implemented posting behavior and explicit gaps are documented in `docs/LEDGER_FINANCIAL_SPEC_AR.md`. In particular, user/device/attachment/audit/idempotency-record entities in the conceptual proposal must not be mistaken for PostgreSQL tables in the current ledger schema.\n\n## 16. Worklog
 
 ### 2026-11-02 — Ledger and sync specification
 - Created this engineering proposal on `design/ledger-and-sync-spec`.
@@ -318,3 +318,51 @@ These are recommendations to validate, not silently finalized product policy:
 - No application code or database migration was executed.
 - No automated tests were run; all tests in Section 13 are acceptance requirements.
 - No paid service, production deployment, or destructive operation was performed.
+
+
+## 17. اعتماد قواعد المزامنة الأساسية — PRD 2.0 / 2026-11-02
+
+هذا القسم يحسم التوصيات السابقة في هذه الوثيقة كقواعد تصميم v1.0. لا يعني أن كل مسار قد نُفذ أو اختُبر على جهاز حقيقي.
+
+### 17.1 قواعد العملية والهوية
+- ينشأ `operation_id` على الجهاز قبل الإرسال ويظل ثابتًا طوال retries والاستعادة.
+- `actor_user_id` و`device_id` يستمدان من principal موثق على الخادم؛ لا يثق الخادم بقيم payload.
+- يحفظ العميل envelope وoutbox ذريًا قبل أي إرسال.
+- يرسل العميل `request_hash` ثابتًا؛ تكرار ID/hash يعيد النتيجة المخزنة، وتكرار ID مع hash مختلف يرفض.
+- يحفظ الخادم نتيجة inbox والعملية وأي قيد مالي والحدث ورقم النسخة في معاملة واحدة.
+
+### 17.2 ترتيب الأحداث والاعتمادات
+- `server_sequence` هو ترتيب الأحداث المرجعي لكل علاقة؛ وقت الجهاز معلومات تشخيصية فقط.
+- سحب الأحداث cursor-based ويعيد كل حدث بعد آخر sequence مؤكد.
+- إذا ظهرت فجوة sequence، يتوقف تطبيق الجزء اللاحق ويطلب replay من آخر cursor متصل.
+- الحدث يطبق مرة واحدة محليًا؛ duplicate event لا يكرر أثرًا أو إشعارًا.
+- العملية التابعة لا ترحل قبل اعتماد مراجعها؛ تعاد `dependency_pending` أو تبقى في queue.
+- لا تعتمد حالة outbox على موافقة الطرف الآخر؛ `synchronized` و`approved` بعدان منفصلان.
+
+### 17.3 التعارض
+- لا Last-Write-Wins للمال أو الموافقات أو التخصيصات.
+- يعتمد الخادم أول قرار نهائي صحيح على `expected_server_version`.
+- الطلب اللاحق بنسخة قديمة يعاد `conflict_stale_version` مع الحالة canonical؛ لا يعاد تطبيقه تلقائيًا.
+- يجب أن يعرض العميل التعارض ويطلب من المستخدم مراجعة الحالة قبل إنشاء أمر جديد بمعرف جديد.
+
+### 17.4 المرفقات والاستعادة
+- bytes للمرفقات خارج PostgreSQL؛ metadata والتفويض والعلاقة وoperation ID وبصمة SHA-256 في قاعدة البيانات.
+- upload قابل للاستئناف، ولا يصبح مكتملًا قبل تحقق hash من الخادم.
+- لا يقرأ المرفق إلا عضو مخول في العلاقة.
+- يجب أن تتضمن خطة الاستعادة بيانات ledger وinbox/idempotency وaudit وmembership وattachment metadata، مع اختبار تطابق بعد restore.
+- لا يجوز حذف التطبيق/القاعدة المحلية أو تغيير مالك outbox قبل حفظ/استرداد العمليات غير المتزامنة وفق إجراء واضح.
+
+### 17.5 حالات sync المعتمدة
+| الحالة | المعنى |
+|---|---|
+| local_only | لم تدخل outbox بعد؛ لا مشاركة |
+| queued | محفوظة محليًا وتنتظر الإرسال |
+| sending | أرسلت ولم تصل نتيجة canonical بعد |
+| synchronized | الخادم أكد الاستلام وأعاد النتيجة؛ لا يعني approved |
+| retryable_error | فشل مؤقت؛ يعاد بنفس ID/hash |
+| blocked_dependency | تنتظر عملية مرجعية |
+| conflict | تحتاج مراجعة صريحة |
+| rejected_by_server | رفض تحقق الخادم؛ لا أثر مالي |
+
+### 17.6 بوابة قبول المزامنة
+لا تعتبر المزامنة الأساسية مثبتة حتى تنجح اختبارات: retry بعد commit مع dropped response، mismatch hash، ترتيب dependency، فجوة cursor/replay، duplicate inbox، جهازين على version قديمة، انقطاع طويل، إلغاء جهاز، واستعادة backup. محاكاة fake server لا تكفي لإثبات تشغيل هاتفين فعليين.
