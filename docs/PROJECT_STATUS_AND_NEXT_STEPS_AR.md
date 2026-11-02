@@ -71,7 +71,7 @@
 - سجل الطلب غير قابل للتعديل أو الحذف.
 - أضيف اختبار PostgreSQL يغطي رفض الطلب مع دين قائم ثم قبول الطلب بعد تسجيل الدفعة وتخصيصها بالكامل.
 - أضيفت migration والاختبار إلى CI، وأضيفت migration إلى بيئة قياس الأداء.
-- **الحالة: اختبار PostgreSQL ناجح في GitHub Actions Run #62** (2026-11-02): https://github.com/overurdream-collab/test4/actions/runs/41365278488. اختبارات API Run #34 ناجحة: https://github.com/overurdream-collab/test4/actions/runs/41365278533. اختبار الحمل والتحليل التشخيصي Run #19 ما زال قيد التنفيذ عند هذا التحديث.
+- **الحالة: اختبار PostgreSQL Run #62 ناجح**: https://github.com/overurdream-collab/test4/actions/runs/41365278488. اختبارات API Run #34 ناجحة: https://github.com/overurdream-collab/test4/actions/runs/41365278533. قياس مليون سجل + التشخيص Run #19 ناجح: https://github.com/overurdream-collab/test4/actions/runs/41365278492. كشف التشخيص ارتفاع زمن مرحلة اعتماد/ترحيل التخصيص عند 50 عاملاً؛ أضيفت migration 006 لتقييد مجاميع التخصيص بالعلاقة حتى تستخدم الفهارس المركبة. إعادة الاختبارات والقياس بعد migration 006 ما زالت مطلوبة.
 
 ## 5. ما تبقى للوصول إلى نواة قابلة للاستخدام
 
