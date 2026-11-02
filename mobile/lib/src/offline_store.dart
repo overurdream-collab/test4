@@ -26,6 +26,7 @@ class OfflineOperation {
     this.businessState,
     this.serverVersion,
     this.serverSequence,
+    this.syncShard = 0,
     this.attempts = 0,
   });
 
@@ -39,6 +40,7 @@ class OfflineOperation {
   final String? businessState;
   final int? serverVersion;
   final int? serverSequence;
+  final int syncShard;
   final int attempts;
 
   factory OfflineOperation.fromRow(Map<String, Object?> row) {
@@ -55,6 +57,7 @@ class OfflineOperation {
       businessState: row['business_state'] as String?,
       serverVersion: row['server_version'] as int?,
       serverSequence: row['server_sequence'] as int?,
+      syncShard: row['sync_shard'] as int? ?? 0,
       attempts: row['attempts']! as int,
     );
   }
@@ -64,6 +67,7 @@ class SyncEvent {
   const SyncEvent({
     required this.relationshipId,
     required this.serverSequence,
+    this.syncShard = 0,
     required this.eventId,
     required this.operationId,
     required this.eventType,
@@ -73,6 +77,7 @@ class SyncEvent {
 
   final String relationshipId;
   final int serverSequence;
+  final int syncShard;
   final String eventId;
   final String operationId;
   final String eventType;
@@ -107,11 +112,12 @@ class OfflineStore {
     final database = await sqlcipher.openDatabase(
       path,
       password: key,
-      version: 1,
+      version: 2,
       onConfigure: (database) async {
         await database.execute('PRAGMA foreign_keys = ON');
       },
       onCreate: _createSchema,
+      onUpgrade: _upgradeSchema,
     );
     return OfflineStore._(database);
   }
@@ -125,11 +131,12 @@ class OfflineStore {
     final database = await factory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 1,
+        version: 2,
         onConfigure: (database) async {
           await database.execute('PRAGMA foreign_keys = ON');
         },
         onCreate: _createSchema,
+        onUpgrade: _upgradeSchema,
       ),
     );
     return OfflineStore._(database);
@@ -150,6 +157,7 @@ class OfflineStore {
         business_state TEXT,
         server_version INTEGER,
         server_sequence INTEGER,
+        sync_shard INTEGER NOT NULL DEFAULT 0 CHECK(sync_shard BETWEEN 0 AND 7),
         origin TEXT NOT NULL CHECK (origin IN ('local','remote')),
         client_created_at TEXT NOT NULL,
         attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
@@ -168,6 +176,7 @@ class OfflineStore {
       CREATE TABLE local_events (
         relationship_id TEXT NOT NULL,
         server_sequence INTEGER NOT NULL CHECK (server_sequence > 0),
+        sync_shard INTEGER NOT NULL DEFAULT 0 CHECK(sync_shard BETWEEN 0 AND 7),
         event_id TEXT NOT NULL UNIQUE,
         operation_id TEXT NOT NULL,
         event_type TEXT NOT NULL,
@@ -178,9 +187,11 @@ class OfflineStore {
     ''');
     await database.execute('''
       CREATE TABLE sync_cursors (
-        relationship_id TEXT PRIMARY KEY,
+        relationship_id TEXT NOT NULL,
+        sync_shard INTEGER NOT NULL DEFAULT 0 CHECK(sync_shard BETWEEN 0 AND 7),
         last_server_sequence INTEGER NOT NULL DEFAULT 0
-          CHECK (last_server_sequence >= 0)
+          CHECK (last_server_sequence >= 0),
+        PRIMARY KEY(relationship_id,sync_shard)
       )
     ''');
     await database.execute(
@@ -190,6 +201,47 @@ class OfflineStore {
       'CREATE INDEX local_operations_relationship_idx '
       'ON local_operations(relationship_id, client_created_at)',
     );
+  }
+
+  static Future<void> _upgradeSchema(Database database, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await database.execute("ALTER TABLE local_operations ADD COLUMN sync_shard INTEGER NOT NULL DEFAULT 0");
+      await database.execute("ALTER TABLE local_events ADD COLUMN sync_shard INTEGER NOT NULL DEFAULT 0");
+      final operations = await database.query('local_operations', columns: ['operation_id']);
+      for (final row in operations) {
+        final id = (row['operation_id']! as String).replaceAll('-', '');
+        final shard = int.parse(id.substring(id.length - 1), radix: 16) % 8;
+        await database.update('local_operations', {'sync_shard': shard}, where: 'operation_id = ?', whereArgs: [row['operation_id']]);
+      }
+      final events = await database.query('local_events', columns: ['event_id','operation_id']);
+      for (final row in events) {
+        final id = (row['operation_id']! as String).replaceAll('-', '');
+        final shard = int.parse(id.substring(id.length - 1), radix: 16) % 8;
+        await database.update('local_events', {'sync_shard': shard}, where: 'event_id = ?', whereArgs: [row['event_id']]);
+      }
+      await database.execute('ALTER TABLE sync_cursors RENAME TO sync_cursors_v1');
+      await database.execute('''
+        CREATE TABLE sync_cursors (
+          relationship_id TEXT NOT NULL,
+          sync_shard INTEGER NOT NULL CHECK(sync_shard BETWEEN 0 AND 7),
+          last_server_sequence INTEGER NOT NULL DEFAULT 0 CHECK(last_server_sequence >= 0),
+          PRIMARY KEY(relationship_id,sync_shard)
+        )
+      ''');
+      final oldCursors = await database.query('sync_cursors_v1');
+      for (final row in oldCursors) {
+        final relationshipId = row['relationship_id']! as String;
+        final oldCursor = row['last_server_sequence']! as int;
+        for (var shard = 0; shard < 8; shard++) {
+          await database.insert('sync_cursors', {
+            'relationship_id': relationshipId,
+            'sync_shard': shard,
+            'last_server_sequence': shard * 1000000000000 + oldCursor,
+          });
+        }
+      }
+      await database.execute('DROP TABLE sync_cursors_v1');
+    }
   }
 
   static Object? _normalizeJson(Object? value) {
@@ -328,6 +380,7 @@ class OfflineStore {
     required String businessState,
     required int serverVersion,
     required int serverSequence,
+    int syncShard = 0,
   }) async {
     if (serverVersion < 1 || serverSequence < 1) {
       throw ArgumentError('Invalid canonical server version or sequence');
@@ -340,6 +393,7 @@ class OfflineStore {
           'business_state': businessState,
           'server_version': serverVersion,
           'server_sequence': serverSequence,
+          'sync_shard': syncShard,
           'last_error': null,
         },
         where: 'operation_id = ?',
@@ -371,126 +425,95 @@ class OfflineStore {
     });
   }
 
+  Future<Map<int,int>> syncCursors(String relationshipId) async {
+    final rows = await _database.query('sync_cursors',
+      columns: ['sync_shard','last_server_sequence'],
+      where: 'relationship_id = ?', whereArgs: [relationshipId]);
+    final result = <int,int>{for (var shard=0; shard<8; shard++) shard: 0};
+    for (final row in rows) result[row['sync_shard']! as int] = row['last_server_sequence']! as int;
+    return result;
+  }
+
   Future<int> syncCursor(String relationshipId) async {
-    final rows = await _database.query(
-      'sync_cursors',
-      columns: ['last_server_sequence'],
-      where: 'relationship_id = ?',
-      whereArgs: [relationshipId],
-      limit: 1,
-    );
-    return rows.isEmpty ? 0 : rows.first['last_server_sequence']! as int;
+    final values = await syncCursors(relationshipId);
+    return values.values.fold<int>(0,(a,b)=>a>b?a:b);
   }
 
   Future<void> applyEvents(
     String relationshipId,
-    List<SyncEvent> events,
-  ) async {
+    List<SyncEvent> events, {
+    Map<int,int>? nextCursor,
+  }) async {
     await _database.transaction((transaction) async {
-      final cursorRows = await transaction.query(
-        'sync_cursors',
-        columns: ['last_server_sequence'],
-        where: 'relationship_id = ?',
-        whereArgs: [relationshipId],
-        limit: 1,
-      );
-      var cursor = cursorRows.isEmpty
-          ? 0
-          : cursorRows.first['last_server_sequence']! as int;
+      final cursorRows = await transaction.query('sync_cursors',
+        columns: ['sync_shard','last_server_sequence'],
+        where: 'relationship_id = ?', whereArgs: [relationshipId]);
+      final cursors = <int,int>{for (var shard=0; shard<8; shard++) shard: 0};
+      for (final row in cursorRows) cursors[row['sync_shard']! as int] = row['last_server_sequence']! as int;
 
       for (final event in events) {
-        if (event.relationshipId != relationshipId) {
-          throw StateError('Event belongs to a different relationship');
-        }
+        if (event.relationshipId != relationshipId) throw StateError('Event belongs to a different relationship');
+        if (event.syncShard < 0 || event.syncShard > 7) throw StateError('Invalid event shard');
+        final cursor = cursors[event.syncShard] ?? 0;
         if (event.serverSequence <= cursor) continue;
-        if (event.serverSequence != cursor + 1) {
-          throw StateError('Sync event gap: expected ${cursor + 1}, got ${event.serverSequence}');
-        }
 
         if (event.eventType == 'operation.created') {
-          final operationPayload = Map<String, Object?>.from(
-            event.payload['payload'] as Map? ?? const <String, Object?>{},
-          );
+          final operationPayload = Map<String,Object?>.from(event.payload['payload'] as Map? ?? const <String,Object?>{});
           final operationType = event.payload['operationType'] as String?;
           final businessState = event.payload['businessState'] as String?;
           final serverVersion = (event.payload['serverVersion'] as num?)?.toInt();
-          if (operationType == null || businessState == null || serverVersion == null) {
-            throw StateError('Malformed operation.created event');
-          }
-
-          await transaction.rawInsert(
-            '''
+          if (operationType == null || businessState == null || serverVersion == null) throw StateError('Malformed operation.created event');
+          await transaction.rawInsert('''
             INSERT INTO local_operations (
-              operation_id, relationship_id, operation_type, schema_version,
-              base_server_version, payload_json, transport_state, business_state,
-              server_version, server_sequence, origin, client_created_at, attempts
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0)
+              operation_id,relationship_id,operation_type,schema_version,base_server_version,
+              payload_json,transport_state,business_state,server_version,server_sequence,sync_shard,
+              origin,client_created_at,attempts
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0)
             ON CONFLICT(operation_id) DO UPDATE SET
-              transport_state='synced',
-              business_state=excluded.business_state,
-              server_version=excluded.server_version,
-              server_sequence=excluded.server_sequence
-            ''',
-            [
-              event.operationId,
-              relationshipId,
-              operationType,
-              1,
-              0,
-              _canonicalJson(operationPayload),
-              'synced',
-              businessState,
-              serverVersion,
-              event.serverSequence,
-              'remote',
-              event.createdAt.toUtc().toIso8601String(),
-            ],
-          );
-          // A server event proves acceptance even if the HTTP response was lost.
-          await transaction.delete(
-            'outbox',
-            where: 'operation_id = ?',
-            whereArgs: [event.operationId],
-          );
+              transport_state='synced',business_state=excluded.business_state,
+              server_version=excluded.server_version,server_sequence=excluded.server_sequence,
+              sync_shard=excluded.sync_shard
+          ''',[
+            event.operationId,relationshipId,operationType,1,0,_canonicalJson(operationPayload),
+            'synced',businessState,serverVersion,event.serverSequence,event.syncShard,'remote',
+            event.createdAt.toUtc().toIso8601String(),
+          ]);
+          await transaction.delete('outbox',where:'operation_id = ?',whereArgs:[event.operationId]);
         } else if (event.eventType == 'operation.state_changed') {
           final businessState = event.payload['businessState'] as String?;
           final serverVersion = (event.payload['serverVersion'] as num?)?.toInt();
-          if (businessState == null || serverVersion == null) {
-            throw StateError('Malformed operation.state_changed event');
-          }
-          final changed = await transaction.update(
-            'local_operations',
-            {
-              'business_state': businessState,
-              'server_version': serverVersion,
-              'server_sequence': event.serverSequence,
-              'transport_state': 'synced',
-            },
-            where: 'operation_id = ? AND relationship_id = ?',
-            whereArgs: [event.operationId, relationshipId],
-          );
-          if (changed != 1) {
-            throw StateError('State event arrived before its operation.created event');
-          }
+          if (businessState == null || serverVersion == null) throw StateError('Malformed operation.state_changed event');
+          final changed = await transaction.update('local_operations',{
+            'business_state':businessState,'server_version':serverVersion,
+            'server_sequence':event.serverSequence,'sync_shard':event.syncShard,'transport_state':'synced',
+          },where:'operation_id = ? AND relationship_id = ?',whereArgs:[event.operationId,relationshipId]);
+          if (changed != 1) throw StateError('State event arrived before its operation.created event');
         } else {
           throw StateError('Unsupported sync event type: ${event.eventType}');
         }
 
-        await transaction.insert('local_events', {
-          'relationship_id': relationshipId,
-          'server_sequence': event.serverSequence,
-          'event_id': event.eventId,
-          'operation_id': event.operationId,
-          'event_type': event.eventType,
-          'event_payload_json': _canonicalJson(event.payload),
-          'received_at': DateTime.now().toUtc().toIso8601String(),
+        await transaction.insert('local_events',{
+          'relationship_id':relationshipId,'server_sequence':event.serverSequence,
+          'sync_shard':event.syncShard,'event_id':event.eventId,'operation_id':event.operationId,
+          'event_type':event.eventType,'event_payload_json':_canonicalJson(event.payload),
+          'received_at':DateTime.now().toUtc().toIso8601String(),
         });
-        cursor = event.serverSequence;
-        await transaction.insert(
-          'sync_cursors',
-          {'relationship_id': relationshipId, 'last_server_sequence': cursor},
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
+        cursors[event.syncShard]=event.serverSequence;
+        await transaction.insert('sync_cursors',{
+          'relationship_id':relationshipId,'sync_shard':event.syncShard,
+          'last_server_sequence':event.serverSequence,
+        },conflictAlgorithm:ConflictAlgorithm.replace);
+      }
+      if (nextCursor != null) {
+        for (var shard=0; shard<8; shard++) {
+          final value=nextCursor[shard] ?? cursors[shard] ?? 0;
+          if (value > (cursors[shard] ?? 0)) {
+            cursors[shard]=value;
+            await transaction.insert('sync_cursors',{
+              'relationship_id':relationshipId,'sync_shard':shard,'last_server_sequence':value,
+            },conflictAlgorithm:ConflictAlgorithm.replace);
+          }
+        }
       }
     });
   }

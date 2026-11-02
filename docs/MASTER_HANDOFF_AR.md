@@ -975,3 +975,19 @@ PRD 1.1 يطرح:
 - خارج مهمة الأداء: لا تعديل بنيوي أو موارد مدفوعة قبل القياس الأطول.
 - أولويات الحزمة التالية تبقى تقوية refresh-token rotation/reuse detection/logout وربط session principal بتركيب API موحد، دون مزود SMS مدفوع أو نشر قبل الموافقة.
 - هذا التسليم ينسخ حالات «PR #37/PR #36 مفتوح» و«PR #34 لم يدمج» الواردة في الملاحظات التاريخية؛ راجع أرقام الدمج والأدلة أعلاه.
+
+
+---
+
+## نقطة استئناف الأداء المالي — 2026-11-02
+
+- PR #42: https://github.com/overurdream-collab/test4/pull/42 (مفتوح، غير مدمج).
+- آخر commit قبل هذا التوثيق: `dd319834c3fcc70752f82b94fcf9c99e86f0abcd`.
+- تم استكمال المصفوفة الكاملة بعد migration 013: Run `41495182632`، 12/12 ناجحة، seed `mcias-ledger-soak-2026-11-02-v1`، PostgreSQL 16، 50 عاملًا، hot share قرابة 90%، دون أخطاء أو deadlocks.
+- baseline مستقل كامل المخطط قبل 013: Run `41495182602`؛ كل تشغيلات baseline أظهرت deadlocks على tuple صف `ledger.relationships` (406–1,570) وأخطاء (503–1,995). الفشل متوقع في هذا baseline التشخيصي، وليس فشلًا في post-fix.
+- الترحيل 013 غيّر ثلاثة حراس للعلاقة إلى `FOR SHARE` مع إبقاء مسار تصفير الدورة حصريًا. هذا أنهى deadlocks في مصفوفة post-fix.
+- لا تزال نقطة الاختناق التالية `ledger.relationship_sync_counters`: الحجب tuple بين `accept_operation` و`decide_operation` بسبب تخصيص sequence لأحداث القبول والقرار. لا تدّعِ حل contention.
+- p95 hot: 60s = 850–1,063 ms؛ 300s = 1,098–1,557 ms. التكرارات متذبذبة، لذلك لا تحقق معيار الأداء الأصلي.
+- اختبارات PostgreSQL Run `41495182556` وApproval API Run `41495182777` وmillion-event Run `41495182784`: success.
+- لا دمج ولا نشر ولا تعديل production.
+- الخطوة التالية: دراسة بديل يحافظ على دلالات cursor وترتيب الأحداث قبل تغيير counter؛ اختبر استهلاك sync cursor، gaps بعد rollback، وترتيب accept/approve وإعادة المزامنة. لا تنفذ تغييرات بنيوية دون اختبار توافق كامل.

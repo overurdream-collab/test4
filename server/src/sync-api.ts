@@ -19,7 +19,7 @@ type OperationBody = {
 };
 
 type EventsParams = { relationshipId: string };
-type EventsQuery = { after?: string; limit?: string };
+type EventsQuery = { after?: string; cursors?: string; limit?: string };
 
 declare module "fastify" {
   interface FastifyRequest {
@@ -143,6 +143,7 @@ export function buildSyncApi({ pool, resolvePrincipal }: Dependencies): FastifyI
           businessState: row.business_state,
           serverVersion: Number(row.server_version),
           serverSequence: Number(row.server_sequence),
+          syncShard: parseInt(request.body.operationId.replace(/-/g, '').slice(-1), 16) % 8,
           serverCreatedAt: row.server_created_at
         });
       } catch (error) {
@@ -171,6 +172,7 @@ export function buildSyncApi({ pool, resolvePrincipal }: Dependencies): FastifyI
           type: "object", additionalProperties: false,
           properties: {
             after: { type: "string", pattern: "^[0-9]+$" },
+            cursors: { type: "string", maxLength: 2048 },
             limit: { type: "string", pattern: "^[0-9]+$" }
           }
         }
@@ -180,16 +182,33 @@ export function buildSyncApi({ pool, resolvePrincipal }: Dependencies): FastifyI
       const principal = request.syncPrincipal;
       if (!principal) return reply.code(401).send({ error: "unauthorized" });
 
-      const after = Number(request.query.after ?? "0");
       const limit = Number(request.query.limit ?? "100");
-      if (!Number.isSafeInteger(after) || after < 0 ||
-          !Number.isSafeInteger(limit) || limit < 1 || limit > 200) {
+      let cursors: Record<string, number> = {};
+      try {
+        if (request.query.cursors) {
+          const parsed = JSON.parse(request.query.cursors) as Record<string, unknown>;
+          for (let shard = 0; shard < 8; shard++) {
+            const value = parsed[String(shard)] ?? 0;
+            if (!Number.isSafeInteger(value) || Number(value) < 0) throw new Error("invalid cursor");
+            cursors[String(shard)] = Number(value);
+          }
+        } else {
+          const after = Number(request.query.after ?? "0");
+          if (!Number.isSafeInteger(after) || after < 0) throw new Error("invalid cursor");
+          for (let shard = 0; shard < 8; shard++) cursors[String(shard)] = shard * 1000000000000 + after;
+        }
+      } catch {
+        return reply.code(400).send({ error: "invalid_sync_cursor" });
+      }
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) {
         return reply.code(400).send({ error: "invalid_sync_cursor" });
       }
 
       try {
         const result = await pool.query<{
           authorized: boolean;
+          sync_shard: number;
+          floor_sequence: string | number;
           server_sequence: string | number | null;
           event_id: string | null;
           operation_id: string | null;
@@ -200,37 +219,49 @@ export function buildSyncApi({ pool, resolvePrincipal }: Dependencies): FastifyI
           "WITH auth AS (" +
             " SELECT EXISTS (SELECT 1 FROM ledger.relationship_members" +
             " WHERE relationship_id=$1::uuid AND user_id=$2::uuid AND status='active') AS authorized" +
+          "), cursor_values AS (" +
+            " SELECT key::smallint AS sync_shard,value::bigint AS after_sequence FROM jsonb_each_text($3::jsonb)" +
           ") " +
-          "SELECT auth.authorized, e.server_sequence, e.event_id, e.operation_id," +
-          " e.event_type, e.event_payload, e.created_at" +
-          " FROM auth LEFT JOIN LATERAL (" +
+          "SELECT auth.authorized,c.sync_shard," +
+          " (c.sync_shard::bigint*1000000000000+COALESCE(sc.last_sequence,0)) AS floor_sequence," +
+          " e.server_sequence,e.event_id,e.operation_id,e.event_type,e.event_payload,e.created_at" +
+          " FROM auth CROSS JOIN cursor_values c" +
+          " LEFT JOIN ledger.relationship_sync_shard_counters sc" +
+            " ON sc.relationship_id=$1::uuid AND sc.sync_shard=c.sync_shard" +
+          " LEFT JOIN LATERAL (" +
             " SELECT server_sequence,event_id,operation_id,event_type,event_payload,created_at" +
-            " FROM ledger.relationship_events WHERE relationship_id=$1::uuid AND server_sequence>$3::bigint" +
-            " ORDER BY server_sequence LIMIT ($4::integer + 1)" +
-          ") e ON auth.authorized ORDER BY e.server_sequence NULLS LAST",
-          [request.params.relationshipId, principal.userId, after, limit]
+            " FROM ledger.relationship_events" +
+            " WHERE relationship_id=$1::uuid AND sync_shard=c.sync_shard AND server_sequence>c.after_sequence" +
+            " ORDER BY server_sequence LIMIT ($4::integer+1)" +
+          ") e ON auth.authorized ORDER BY c.sync_shard,e.server_sequence NULLS LAST",
+          [request.params.relationshipId, principal.userId, JSON.stringify(cursors), limit]
         );
 
         if (result.rows[0]?.authorized !== true) {
           return reply.code(403).send({ error: "forbidden" });
         }
 
-        const fetchedEvents = result.rows
-          .filter(row => row.server_sequence !== null)
-          .map(row => ({
+        const events: Array<Record<string, unknown>> = [];
+        const nextCursor: Record<string, number> = { ...cursors };
+        let hasMore = false;
+        for (let shard = 0; shard < 8; shard++) {
+          const rows = result.rows.filter(row => row.sync_shard === shard && row.server_sequence !== null);
+          if (rows.length > limit) hasMore = true;
+          const selected = rows.slice(0, limit);
+          for (const row of selected) events.push({
+            syncShard: shard,
             serverSequence: Number(row.server_sequence),
             eventId: row.event_id,
             operationId: row.operation_id,
             eventType: row.event_type,
             payload: row.event_payload,
             createdAt: row.created_at
-          }));
-        const hasMore = fetchedEvents.length > limit;
-        const events = fetchedEvents.slice(0, limit);
-        const nextCursor = events.length > 0
-          ? events[events.length - 1]!.serverSequence
-          : after;
-
+          });
+          const last = selected.length ? Number(selected[selected.length-1]!.server_sequence) : cursors[String(shard)]!;
+          const floorRow = result.rows.find(row => row.sync_shard === shard);
+          const floor = floorRow ? Number(floorRow.floor_sequence) : shard * 1000000000000;
+          nextCursor[String(shard)] = rows.length > limit ? last : Math.max(last, floor);
+        }
         return reply.code(200).send({ events, nextCursor, hasMore });
       } catch (error) {
         request.log.error({ err: error }, "Relationship event sync failed");

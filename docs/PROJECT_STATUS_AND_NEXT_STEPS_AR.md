@@ -516,3 +516,18 @@
 - واجهة المستخدم للمرتجعات، رد نقدي فعلي، وتطبيق الرصيد الدائن على مشتريات لاحقة.
 - قياس أداء أطول على runner ثابت قبل أي تحسين بنيوي أو إعلان سعة.
 - تقوية refresh-token rotation/reuse detection/logout وربط الجلسات بتركيب APIs موحد.
+
+
+---
+
+## تحديث أداء الدفتر المالي — 2026-11-02 (PR #42)
+
+- migration 013 واختبارها 014 موجودان على فرع PR فقط. تم تخفيف أقفال القراءة في ثلاثة حراس للعلاقة من `FOR UPDATE` إلى `FOR SHARE`.
+- post-fix soak الكامل: Run `41495182632`، 12/12 نجاح؛ 50 عاملًا؛ seed ثابت؛ 60s و300s؛ uniform/hot؛ 3 تكرارات. أخطاء=0 وdeadlocks=0.
+- baseline full-schema قبل 013: Run `41495182602`، سجّل 406–1,570 deadlocks و503–1,995 أخطاء بسبب التنافس على صف `ledger.relationships`. هذه نتيجة baseline تشخيصية فاشلة وليست baseline أداء صالحًا.
+- بقي اختناق sequence: عينات الحجب بعد الإصلاح تظهر `ledger.relationship_sync_counters` tuple locks بين `accept_operation` و`decide_operation`. p95 hot 60s: 850–1,063 ms؛ 300s: 1,098–1,557 ms، بتذبذب لا يثبت التحسن.
+- اختبارات PostgreSQL وApproval API وmillion-event benchmark ناجحة (Runs `41495182556`, `41495182777`, `41495182784`).
+- PR #42 ما زال مفتوحًا وغير مدمج. لا نشر أو قاعدة إنتاجية.
+- التالي: تحليل دلالات sequence/cursor واختبار تصميم بديل دون الإخلال بترتيب أحداث العلاقة أو idempotency أو rollback.
+
+التفاصيل الكاملة والأرقام لكل تشغيل في `docs/FINANCIAL_SOAK_ANALYSIS_2026-11-02.md`.

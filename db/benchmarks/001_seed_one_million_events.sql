@@ -36,10 +36,10 @@ SELECT
   'awaiting_counterparty',
   0,
   1,
-  now() - ((n % 86400)::text || ' seconds')::interval,
+  TIMESTAMPTZ '2026-11-02 00:00:00+00' - ((n % 86400)::text || ' seconds')::interval,
   md5('bench-device-' || n)::uuid,
   1,
-  now(),
+  TIMESTAMPTZ '2026-11-02 00:00:00+00',
   jsonb_build_object('amountMinor', 1000 + (n % 1000), 'currency', 'YER'),
   ((n - 1) / 1000) + 1
 FROM generate_series(1, 1000000) AS gs(n);
@@ -47,6 +47,18 @@ FROM generate_series(1, 1000000) AS gs(n);
 INSERT INTO ledger.relationship_sync_counters (relationship_id, last_sequence)
 SELECT md5('bench-rel-' || n)::uuid, 1000
 FROM generate_series(1, 1000) AS gs(n);
+
+DO $
+BEGIN
+ IF to_regclass('ledger.relationship_sync_shard_counters') IS NOT NULL THEN
+  INSERT INTO ledger.relationship_sync_shard_counters (relationship_id,sync_shard,last_sequence)
+  SELECT md5('bench-rel-' || n)::uuid,shard,1000
+  FROM generate_series(1,1000) AS gs(n)
+  CROSS JOIN generate_series(0,7) AS shards(shard)
+  ON CONFLICT(relationship_id,sync_shard) DO UPDATE SET last_sequence=EXCLUDED.last_sequence;
+ END IF;
+END;
+$;
 
 INSERT INTO ledger.relationship_events (
   relationship_id, server_sequence, event_id, operation_id, event_type, event_payload

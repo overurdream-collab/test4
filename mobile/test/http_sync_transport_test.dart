@@ -24,12 +24,14 @@ void main() {
           'businessState': 'awaiting_counterparty',
           'serverVersion': 1,
           'serverSequence': 1,
+          'syncShard': 1,
           'serverCreatedAt': '2026-11-02T00:00:00.000Z',
         }));
       } else {
         request.response.write(jsonEncode({
           'events': [{
             'serverSequence': 1,
+            'syncShard': 0,
             'eventId': '43000000-0000-0000-0000-000000000001',
             'operationId': '33000000-0000-0000-0000-000000000001',
             'eventType': 'operation.created',
@@ -42,7 +44,7 @@ void main() {
             },
             'createdAt': '2026-11-02T00:00:00.000Z',
           }],
-          'nextCursor': 1,
+          'nextCursor': {'0': 1},
           'hasMore': false,
         }));
       }
@@ -73,12 +75,12 @@ void main() {
 
     final page = await transport.pullEvents(
       relationshipId: operation.relationshipId,
-      after: 0,
+      cursors: {0: 0},
       limit: 10,
     );
     expect(page.events, hasLength(1));
     expect(page.events.single.serverSequence, 1);
-    expect(page.nextCursor, 1);
+    expect(page.nextCursor[0], 1);
     expect(page.hasMore, false);
 
     transport.close();

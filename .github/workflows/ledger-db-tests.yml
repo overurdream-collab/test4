@@ -141,3 +141,31 @@ jobs:
         env:
           PGPASSWORD: ledger_test
         run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/tests/012_relationship_invitations_test.sql
+
+      - name: Apply relationship sequence contention optimization
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/migrations/012_relationship_sequence_contention.sql
+
+      - name: Run relationship sequence contention tests
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/tests/013_relationship_sequence_contention_test.sql
+
+      - name: Apply shared relationship read-lock optimization
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/migrations/013_shared_relationship_read_locks.sql
+      - name: Run shared relationship read-lock tests
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/tests/014_shared_relationship_read_locks_test.sql
+
+      - name: Apply sharded relationship event cursors
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/migrations/014_sharded_relationship_event_cursors.sql
+      - name: Test sharded relationship event cursors
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/tests/015_sharded_relationship_event_cursors_test.sql
