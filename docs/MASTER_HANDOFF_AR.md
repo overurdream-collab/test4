@@ -858,3 +858,40 @@ PRD 1.1 يطرح:
 5. ربط صلاحيات العضوية بالهوية الحقيقية، مع اختبار عزل العلاقات على API وPostgreSQL.
 6. لا اعتماد مزود SMS مدفوع أو خدمة خارجية قبل مقارنة تكلفة/أمان وإذن المستخدم.
 
+
+
+---
+
+## تسليم تنفيذ — الحزمة 1 / أساس الهوية والأجهزة والجلسات (2026-11-02)
+
+### الدمج والأدلة
+- PR #32 مدمج: https://github.com/overurdream-collab/test4/pull/32
+- Merge SHA: `394d7efd4c5870a8b4d8b36a6428aaa61075a0f1`.
+- PostgreSQL Run #145 (ID `41470298195`): success؛ migration 010 واختبار identity foundation 011 نجحا بعد سلسلة migrations 001–010.
+- Approval API checks Run #73 (ID `41470298230`): success؛ Node 22 typecheck واختبارات API.
+- لا نشر ولا قاعدة إنتاجية ولا خدمة مدفوعة.
+
+### ما نُفذ
+1. schema منفصل `identity`: users, user_profiles, phone_identities, devices, auth_sessions, otp_challenges.
+2. `identity.create_otp_challenge`: حجز ذري مع حدود 3 طلبات لكل رقم/15 دقيقة و10 طلبات لكل IP/ساعة.
+3. `identity.consume_otp_challenge`: صلاحية 5 دقائق، حد أقصى 5 محاولات، واستهلاك لمرة واحدة.
+4. `identity.get_or_create_user_by_phone`: ربط رقم موثق بحساب واحد.
+5. `buildIdentityApi`: طلب/تحقق OTP عبر `OtpDeliveryAdapter`، إصدار access JWT HS256 لمدة 15 دقيقة، والتحقق من الجلسة والجهاز والحساب النشط في كل طلب.
+6. `GET/PATCH /v1/me` للملف الشخصي الأساسي.
+7. `POST /v1/devices/:deviceId/revoke` لإلغاء الجهاز وإبطال جلساته.
+8. اختبارات API وPostgreSQL، وربط migration 010 واختبار 011 في CI.
+
+### إخفاقات جرى إصلاحها وتوثيقها
+- فشل أول تشغيل migration بسبب delimiter غير مكتمل وبقايا SQL orphaned بعد دالة OTP؛ أعيد بناء الدوال بعلامات dollar-quote مسماة وحذف الجزء اليتيم/التكرار.
+- فشل اختبار انتهاء OTP لأنه أدخل `expires_at < created_at` مخالفًا لقيد الجدول؛ صحح الاختبار إلى تحدٍّ صالح زمنيًا وتمرير وقت تحقق لاحق إلى الدالة.
+- بعد الإصلاح، Run #145 وRun #73 نجحا. لا نخفي محاولات الفشل السابقة.
+
+### ما لم ينفذ بعد
+- لا يوجد SMS provider حقيقي أو إعداد أسرار إنتاجي؛ adapter مجرد حد تكامل قابل للاستبدال.
+- لا refresh token؛ access token مدته 15 دقيقة، وإعادة الدخول عبر OTP.
+- لا توجد نقطة تشغيل production composition تربط identity resolver بكل مسارات API؛ الوحدة جاهزة للحقن والاختبار فقط.
+- لا توجد بعد إنشاء علاقة وطلب ربط وقبول الطرف المقابل؛ هذا هو الجزء التالي من الحزمة 1.
+- لا توجد FK مباشرة بين `identity.users` و`ledger.relationship_members.user_id` بعد؛ يلزم ربط آمن في مسار إنشاء العلاقة ثم ترحيل/تثبيت القيد.
+
+### نقطة الاستئناف
+استكمال إنشاء العلاقة وطلب الربط وقبول الدعوة، مع منع العمليات المالية حتى يصبح للطرفين عضوية نشطة، ثم اختبارات عزل العلاقات وتعدد العلاقات للمستخدم نفسه.
