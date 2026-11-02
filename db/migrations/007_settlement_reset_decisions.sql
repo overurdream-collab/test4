@@ -84,25 +84,21 @@ LANGUAGE plpgsql
 AS $$
 DECLARE
   existing_request ledger.settlement_requests%ROWTYPE;
+  relationship_status text;
   active_member_count bigint;
   outstanding_obligations numeric;
   unapplied_payments numeric;
   pending_operations bigint;
 BEGIN
-  PERFORM 1 FROM ledger.relationships
-  WHERE id = p_relationship_id AND status = 'active'
+  -- Lock the relationship first, but check an existing idempotency key before
+  -- requiring it to remain active: a delayed retry after successful closure
+  -- must still receive the original request result.
+  SELECT status INTO relationship_status
+  FROM ledger.relationships
+  WHERE id = p_relationship_id
   FOR UPDATE;
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'Active relationship not found' USING ERRCODE = '23503';
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM ledger.relationship_members
-    WHERE relationship_id = p_relationship_id
-      AND user_id = p_actor_user_id AND status = 'active'
-  ) THEN
-    RAISE EXCEPTION 'Requester is not an active relationship member'
-      USING ERRCODE = '42501';
+    RAISE EXCEPTION 'Relationship not found' USING ERRCODE = '23503';
   END IF;
 
   SELECT * INTO existing_request
@@ -114,6 +110,19 @@ BEGIN
     END IF;
     RAISE EXCEPTION 'Settlement request id reused with different content'
       USING ERRCODE = '23505';
+  END IF;
+
+  IF relationship_status <> 'active' THEN
+    RAISE EXCEPTION 'Active relationship not found' USING ERRCODE = '23503';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM ledger.relationship_members
+    WHERE relationship_id = p_relationship_id
+      AND user_id = p_actor_user_id AND status = 'active'
+  ) THEN
+    RAISE EXCEPTION 'Requester is not an active relationship member'
+      USING ERRCODE = '42501';
   END IF;
 
   SELECT count(*) INTO active_member_count
