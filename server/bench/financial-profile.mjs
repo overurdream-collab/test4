@@ -80,29 +80,26 @@ async function createApprovedOperation(rel, type, actor, approver, payload) {
 }
 
 async function snapshot() {
-  const [wal, database] = await Promise.all([
-    monitorPool.query(
-      "SELECT wal_records, wal_fpi, wal_bytes, wal_buffers_full FROM pg_stat_wal"
-    ),
-    monitorPool.query(
-      "SELECT xact_commit, blks_hit, blks_read, tup_inserted, tup_updated, deadlocks, temp_bytes " +
-      "FROM pg_stat_database WHERE datname=current_database()"
-    )
+  const [wal, database, statements] = await Promise.all([
+    monitorPool.query("SELECT wal_records, wal_fpi, wal_bytes, wal_buffers_full FROM pg_stat_wal"),
+    monitorPool.query("SELECT xact_commit, blks_hit, blks_read, tup_inserted, tup_updated, deadlocks, temp_bytes FROM pg_stat_database WHERE datname=current_database()"),
+    monitorPool.query("SELECT COALESCE(sum(calls),0)::bigint AS calls, COALESCE(sum(total_exec_time),0)::numeric AS total_exec_time_ms, COALESCE(sum(shared_blks_hit),0)::bigint AS shared_blks_hit, COALESCE(sum(shared_blks_read),0)::bigint AS shared_blks_read, COALESCE(sum(temp_blks_written),0)::bigint AS temp_blks_written FROM pg_stat_statements")
   ]);
-  return { wal: wal.rows[0], database: database.rows[0] };
+  return { wal: wal.rows[0], database: database.rows[0], statements: statements.rows[0] };
 }
 
 async function profilePhase(concurrency, durationMs) {
   for (const key of Object.keys(stageSamples)) delete stageSamples[key];
   const waitSamples = Object.create(null);
   const lockSamples = Object.create(null);
+  const activitySamples = [];
   const before = await snapshot();
   let stopMonitor = false;
 
   const monitor = (async () => {
     while (!stopMonitor) {
       try {
-        const [waits, locks] = await Promise.all([
+        const [waits, locks, activity] = await Promise.all([
           monitorPool.query(
             "SELECT COALESCE(wait_event_type,'CPU_or_running') AS wait_type, " +
             "COALESCE(wait_event,'none') AS wait_event, state, count(*)::int AS sessions " +
@@ -114,6 +111,12 @@ async function profilePhase(concurrency, durationMs) {
             "FROM pg_locks l JOIN pg_stat_activity a USING(pid) " +
             "WHERE a.application_name='ledger-financial-profile' " +
             "GROUP BY l.locktype,l.mode,l.granted"
+          ),
+          monitorPool.query(
+            "SELECT state, wait_event_type, wait_event, count(*)::int AS sessions, " +
+            "max(clock_timestamp()-query_start) AS longest_query_age " +
+            "FROM pg_stat_activity WHERE application_name='ledger-financial-profile' " +
+            "GROUP BY state,wait_event_type,wait_event"
           )
         ]);
         for (const row of waits.rows) {
@@ -124,6 +127,7 @@ async function profilePhase(concurrency, durationMs) {
           const key = [row.locktype, row.mode, row.granted].join("|");
           lockSamples[key] = (lockSamples[key] ?? 0) + row.lock_count;
         }
+        activitySamples.push({ sampledAt: new Date().toISOString(), groups: activity.rows });
       } catch (error) {
         process.stderr.write("monitor sample failed: " + String(error) + "\n");
       }
@@ -212,8 +216,10 @@ async function profilePhase(concurrency, durationMs) {
     stageLatencyMs: stageReport,
     sampledWaitEvents: waitSamples,
     sampledLocks: lockSamples,
+    sampledActivity: activitySamples,
     walDelta: delta(after.wal, before.wal),
-    databaseDelta: delta(after.database, before.database)
+    databaseDelta: delta(after.database, before.database),
+    pgStatStatementsDelta: delta(after.statements, before.statements)
   };
   console.log(JSON.stringify(report));
   if (errors > 0) throw new Error("financial profile had " + errors + " failed lifecycles");
