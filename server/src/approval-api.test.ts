@@ -299,6 +299,7 @@ test("returns current and archived cycles with explicit debit-minus-credit balan
                 currency: "YER",
                 receivableMinor: "12500",
                 payableMinor: "0",
+                partyBalanceMinor: "12500",
                 unappliedPaymentAssetMinor: "0",
                 unappliedPaymentLiabilityMinor: "0"
               }]
@@ -335,8 +336,9 @@ test("returns current and archived cycles with explicit debit-minus-credit balan
           ownerUserId: userId,
           currency: "YER",
           receivableMinor: "12500",
-                payableMinor: "0",
-                unappliedPaymentAssetMinor: "0",
+          payableMinor: "0",
+          partyBalanceMinor: "12500",
+          unappliedPaymentAssetMinor: "0",
                 unappliedPaymentLiabilityMinor: "0"
         }]
       }
@@ -364,8 +366,8 @@ test("account-cycle balance contract keeps receivables, payables and unapplied p
           startedAt: "2026-11-02T10:00:00.000Z",
           endedAt: null,
           balances: [
-            { ownerUserId: userId, currency: "YER", receivableMinor: "12000", payableMinor: "0", unappliedPaymentAssetMinor: "3000", unappliedPaymentLiabilityMinor: "0" },
-            { ownerUserId: "21000000-0000-0000-0000-000000000003", currency: "YER", receivableMinor: "0", payableMinor: "12000", unappliedPaymentAssetMinor: "0", unappliedPaymentLiabilityMinor: "3000" }
+            { ownerUserId: userId, currency: "YER", receivableMinor: "12000", payableMinor: "0", partyBalanceMinor: "12000", unappliedPaymentAssetMinor: "3000", unappliedPaymentLiabilityMinor: "0" },
+            { ownerUserId: "21000000-0000-0000-0000-000000000003", currency: "YER", receivableMinor: "0", payableMinor: "12000", partyBalanceMinor: "-12000", unappliedPaymentAssetMinor: "0", unappliedPaymentLiabilityMinor: "3000" }
           ]
         }]
       }] };
@@ -377,8 +379,8 @@ test("account-cycle balance contract keeps receivables, payables and unapplied p
   const body = JSON.parse(response.body);
   assert.equal(body.balanceSemantics, "separate_account_classes_minor_units");
   assert.deepEqual(body.cycles[0].balances, [
-    { ownerUserId: userId, currency: "YER", receivableMinor: "12000", payableMinor: "0", unappliedPaymentAssetMinor: "3000", unappliedPaymentLiabilityMinor: "0" },
-    { ownerUserId: "21000000-0000-0000-0000-000000000003", currency: "YER", receivableMinor: "0", payableMinor: "12000", unappliedPaymentAssetMinor: "0", unappliedPaymentLiabilityMinor: "3000" }
+    { ownerUserId: userId, currency: "YER", receivableMinor: "12000", payableMinor: "0", partyBalanceMinor: "12000", unappliedPaymentAssetMinor: "3000", unappliedPaymentLiabilityMinor: "0" },
+    { ownerUserId: "21000000-0000-0000-0000-000000000003", currency: "YER", receivableMinor: "0", payableMinor: "12000", partyBalanceMinor: "-12000", unappliedPaymentAssetMinor: "0", unappliedPaymentLiabilityMinor: "3000" }
   ]);
   await app.close();
 });
@@ -432,8 +434,8 @@ test("account cycle API preserves signed negative receivable and payable values"
         cycleNumber: 2, title: "صفحة بيضاء 2", status: "active",
         startedAt: "2026-11-02T10:00:00.000Z", endedAt: null,
         balances: [
-          { ownerUserId: userId, currency: "YER", receivableMinor: "-5000", payableMinor: "0", unappliedPaymentAssetMinor: "0", unappliedPaymentLiabilityMinor: "0" },
-          { ownerUserId: "21000000-0000-0000-0000-000000000003", currency: "YER", receivableMinor: "0", payableMinor: "-5000", unappliedPaymentAssetMinor: "0", unappliedPaymentLiabilityMinor: "0" }
+          { ownerUserId: userId, currency: "YER", receivableMinor: "-5000", payableMinor: "0", partyBalanceMinor: "-5000", unappliedPaymentAssetMinor: "0", unappliedPaymentLiabilityMinor: "0" },
+          { ownerUserId: "21000000-0000-0000-0000-000000000003", currency: "YER", receivableMinor: "0", payableMinor: "-5000", partyBalanceMinor: "5000", unappliedPaymentAssetMinor: "0", unappliedPaymentLiabilityMinor: "0" }
         ]
       }]
     }] })),
@@ -443,6 +445,8 @@ test("account cycle API preserves signed negative receivable and payable values"
   assert.equal(response.statusCode, 200);
   const balances = JSON.parse(response.body).cycles[0].balances;
   assert.equal(balances[0].receivableMinor, "-5000");
+  assert.equal(balances[0].partyBalanceMinor, "-5000");
   assert.equal(balances[1].payableMinor, "-5000");
+  assert.equal(balances[1].partyBalanceMinor, "5000");
   await app.close();
 });
