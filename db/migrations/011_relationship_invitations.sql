@@ -22,6 +22,7 @@ CREATE TABLE ledger.relationship_invitations (
   responded_by_user_id uuid REFERENCES identity.users(id),
   CHECK (inviter_user_id IS DISTINCT FROM invitee_user_id),
   CHECK (expires_at>created_at),
+  UNIQUE (id,relationship_id),
   CHECK ((relationship_type='merchant_customer' AND
           ((inviter_role='merchant' AND invitee_role='customer') OR
            (inviter_role='customer' AND invitee_role='merchant'))) OR
@@ -62,6 +63,7 @@ RETURNS trigger LANGUAGE plpgsql AS $two_members$
 DECLARE active_count bigint;
 BEGIN
   IF NEW.status='active' THEN
+    PERFORM 1 FROM ledger.relationships WHERE id=NEW.relationship_id FOR UPDATE;
     SELECT count(*) INTO active_count FROM ledger.relationship_members
     WHERE relationship_id=NEW.relationship_id AND status='active' AND user_id<>NEW.user_id;
     IF active_count>=2 THEN
@@ -203,6 +205,8 @@ BEGIN
     RETURN 'expired';
   END IF;
   IF p_decision='accepted' THEN
+    PERFORM 1 FROM ledger.relationships WHERE id=invite.relationship_id AND status='suspended' FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Invitation relationship is not pending' USING ERRCODE='55000'; END IF;
     SELECT count(*) INTO active_count FROM ledger.relationship_members
     WHERE relationship_id=invite.relationship_id AND status='active';
     IF active_count<>1 OR NOT EXISTS (SELECT 1 FROM ledger.relationship_members
