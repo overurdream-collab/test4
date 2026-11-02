@@ -16,6 +16,9 @@ CREATE TABLE ledger.account_cycles (
          (status = 'archived' AND ended_at IS NOT NULL))
 );
 
+CREATE UNIQUE INDEX account_cycles_one_active_per_relationship_idx
+  ON ledger.account_cycles (relationship_id) WHERE status = 'active';
+
 -- Create the first cycle for every existing relationship. Existing financial
 -- history remains together in that initial cycle; nothing is deleted or moved.
 INSERT INTO ledger.account_cycles
