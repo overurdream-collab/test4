@@ -196,24 +196,17 @@ DECLARE old_payment uuid; old_obligation uuid;
 BEGIN
   SELECT payment_id,obligation_id INTO old_payment,old_obligation FROM lifecycle_ids;
 
-  -- Create an approved allocation command in the new cycle, then deliberately
-  -- try to attach old-cycle financial records to that source operation.
-  PERFORM * FROM ledger.accept_operation(
-    '37000000-0000-0000-0000-000000000005',
-    '17000000-0000-0000-0000-000000000001',
-    '27000000-0000-0000-0000-000000000002',
-    '77000000-0000-0000-0000-000000000005',
-    'allocation', decode(repeat('c5',32),'hex'),
-    jsonb_build_object('paymentId',old_payment,'obligationId',old_obligation,'amountMinor',1),
-    0,1,now()
-  );
-  PERFORM ledger.decide_operation(
-    '67000000-0000-0000-0000-000000000005',
-    '17000000-0000-0000-0000-000000000001',
-    '37000000-0000-0000-0000-000000000005',
-    '27000000-0000-0000-0000-000000000001',
-    1,'approved','must fail because allocation crosses cycles'
-  );
+  -- Fixture an already-approved allocation command pinned to the new cycle.
+  -- The direct allocation insert below isolates the cycle guard from the
+  -- ordinary open-balance validation (the old obligation is already settled).
+  INSERT INTO ledger.operations
+    (operation_id,relationship_id,actor_user_id,operation_type,request_hash,
+     business_state,base_version,server_version)
+  VALUES
+    ('37000000-0000-0000-0000-000000000005',
+     '17000000-0000-0000-0000-000000000001',
+     '27000000-0000-0000-0000-000000000002',
+     'allocation',decode(repeat('c5',32),'hex'),'approved',0,1);
 
   BEGIN
     INSERT INTO ledger.allocations
