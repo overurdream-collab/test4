@@ -174,8 +174,8 @@ $$;
   SELECT count(*) INTO ip_requests FROM identity.otp_challenges
   WHERE requested_ip_hash=p_ip_hash AND created_at>clock_timestamp()-interval '1 hour';
   IF phone_requests>=3 OR ip_requests>=10 THEN RETURN NULL; END IF;
-  INSERT INTO identity.otp_challenges(phone_e164,code_hash,requested_ip_hash,status,expires_at)
-  VALUES(p_phone_e164,p_code_hash,p_ip_hash,'pending',p_expires_at)
+  INSERT INTO identity.otp_challenges(phone_e164,code_hash,requested_ip_hash,status,created_at,expires_at)
+  VALUES(p_phone_e164,p_code_hash,p_ip_hash,'pending',clock_timestamp(),p_expires_at)
   RETURNING id INTO challenge_id;
   RETURN challenge_id;
 END;
