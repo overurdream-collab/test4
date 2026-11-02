@@ -8,6 +8,7 @@ import {
 } from "node:crypto";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import type { Pool } from "pg";
+import { DeviceRevokedError } from "./approval-api.js";
 
 export type IdentityPrincipal = { userId: string; deviceId: string };
 
@@ -120,18 +121,25 @@ export function createSessionPrincipalResolver(
     const token = authorization.slice(7).trim();
     const claims = verifyAccessToken(token, accessTokenSecret, Math.floor(now() / 1000));
     if (!claims) return null;
-    const result = await pool.query<{ user_id: string; device_id: string }>(
-      "SELECT s.user_id, s.device_id " +
+    const result = await pool.query<{
+      user_id: string;
+      device_id: string;
+      device_status: string;
+      session_revoked_at: Date | string | null;
+    }>(
+      "SELECT s.user_id, s.device_id, d.status AS device_status, " +
+      "s.revoked_at AS session_revoked_at " +
       "FROM identity.auth_sessions s " +
       "JOIN identity.devices d ON d.id=s.device_id AND d.user_id=s.user_id " +
       "JOIN identity.users u ON u.id=s.user_id " +
       "WHERE s.id=$1::uuid AND s.user_id=$2::uuid AND s.device_id=$3::uuid " +
-      "AND s.expires_at > now() AND s.revoked_at IS NULL " +
-      "AND d.status='active' AND u.status='active'",
+      "AND s.expires_at > now() AND u.status='active'",
       [claims.jti, claims.sub, claims.did]
     );
     const row = result.rows[0];
     if (!row || row.user_id !== claims.sub || row.device_id !== claims.did) return null;
+    if (row.device_status !== "active") throw new DeviceRevokedError();
+    if (row.session_revoked_at !== null) return null;
     return { userId: row.user_id, deviceId: row.device_id };
   };
 }
@@ -417,6 +425,99 @@ export function buildIdentityApi({
           [principal.userId, displayName]
         );
         return reply.code(200).send({ status: "updated" });
+      } catch {
+        return reply.code(500).send({ error: "internal_error" });
+      }
+    }
+  );
+
+  app.get("/v1/devices", async (request, reply) => {
+    const principal = request.identityPrincipal;
+    if (!principal) return reply.code(401).send({ error: "unauthorized" });
+    try {
+      const result = await pool.query<{
+        id: string;
+        device_label: string;
+        platform: string;
+        status: string;
+        registered_at: Date | string;
+        last_seen_at: Date | string;
+        revoked_at: Date | string | null;
+      }>(
+        "SELECT id,device_label,platform,status,registered_at,last_seen_at,revoked_at " +
+        "FROM identity.devices WHERE user_id=$1::uuid " +
+        "ORDER BY registered_at DESC,id",
+        [principal.userId]
+      );
+      return reply.code(200).send({
+        devices: result.rows.map(row => ({
+          id: row.id,
+          label: row.device_label,
+          platform: row.platform,
+          status: row.status,
+          registeredAt: row.registered_at,
+          lastSeenAt: row.last_seen_at,
+          revokedAt: row.revoked_at,
+          isCurrent: row.id === principal.deviceId
+        }))
+      });
+    } catch {
+      return reply.code(500).send({ error: "internal_error" });
+    }
+  });
+
+  app.get<{
+    Params: { deviceId: string };
+    Querystring: { limit?: string };
+  }>(
+    "/v1/devices/:deviceId/events",
+    {
+      schema: {
+        params: {
+          type: "object", required: ["deviceId"],
+          properties: { deviceId: { type: "string", format: "uuid" } }
+        },
+        querystring: {
+          type: "object", additionalProperties: false,
+          properties: { limit: { type: "string", pattern: "^[0-9]+$" } }
+        }
+      }
+    },
+    async (request, reply) => {
+      const principal = request.identityPrincipal;
+      if (!principal) return reply.code(401).send({ error: "unauthorized" });
+      if (!UUID.test(request.params.deviceId)) return reply.code(400).send({ error: "invalid_device_id" });
+      const limit = Number(request.query.limit ?? "100");
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) {
+        return reply.code(400).send({ error: "invalid_limit" });
+      }
+      try {
+        const owned = await pool.query<{ id: string }>(
+          "SELECT id FROM identity.devices WHERE id=$1::uuid AND user_id=$2::uuid",
+          [request.params.deviceId, principal.userId]
+        );
+        if (!owned.rows[0]) return reply.code(404).send({ error: "device_not_found" });
+
+        const result = await pool.query<{
+          id: string;
+          event_type: string;
+          details: Record<string, unknown>;
+          created_at: Date | string;
+        }>(
+          "SELECT id,event_type,details,created_at FROM identity.device_events " +
+          "WHERE device_id=$1::uuid AND user_id=$2::uuid " +
+          "ORDER BY created_at DESC,id DESC LIMIT $3::integer",
+          [request.params.deviceId, principal.userId, limit]
+        );
+        return reply.code(200).send({
+          deviceId: request.params.deviceId,
+          events: result.rows.map(row => ({
+            id: row.id,
+            type: row.event_type,
+            details: row.details,
+            createdAt: row.created_at
+          }))
+        });
       } catch {
         return reply.code(500).send({ error: "internal_error" });
       }

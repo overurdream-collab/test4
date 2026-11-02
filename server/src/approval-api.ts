@@ -11,6 +11,13 @@ export type PrincipalResolver = (
   request: FastifyRequest
 ) => Promise<AuthenticatedPrincipal | null>;
 
+export class DeviceRevokedError extends Error {
+  constructor() {
+    super("device_revoked");
+    this.name = "DeviceRevokedError";
+  }
+}
+
 type Dependencies = {
   pool: Pick<Pool, "query">;
   resolvePrincipal: PrincipalResolver;

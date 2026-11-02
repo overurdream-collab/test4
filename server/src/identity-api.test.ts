@@ -114,7 +114,7 @@ test("session resolver requires an active server session and active device", asy
     makePool(async (sql: string, values: unknown[]) => {
       assert.ok(sql.includes("identity.auth_sessions"));
       assert.deepEqual(values, [sessionId, userId, deviceId]);
-      return { rows: [{ user_id: userId, device_id: deviceId }] };
+      return { rows: [{ user_id: userId, device_id: deviceId, device_status: "active", session_revoked_at: null }] };
     }),
     accessSecret, () => 1_800_000_100_000
   );
@@ -130,7 +130,7 @@ test("revocation endpoint is scoped to the authenticated user's devices", async 
     if (sql.includes("get_or_create_user_by_phone")) return { rows: [{ user_id: userId }] };
     if (sql.includes("INSERT INTO identity.devices")) return { rows: [{ id: deviceId }] };
     if (sql.includes("INSERT INTO identity.auth_sessions")) return { rows: [] };
-    if (sql.includes("FROM identity.auth_sessions s")) return { rows: [{ user_id: userId, device_id: deviceId }] };
+    if (sql.includes("FROM identity.auth_sessions s")) return { rows: [{ user_id: userId, device_id: deviceId, device_status: "active", session_revoked_at: null }] };
     if (sql.includes("WITH revoked_device")) return { rows: [{ id: deviceId }] };
     return { rows: [] };
   });
@@ -164,7 +164,7 @@ test("relationship creation, invitation lookup, bilateral acceptance and scoped 
     if (sql.includes("get_or_create_user_by_phone")) return { rows: [{ user_id: userId }] };
     if (sql.includes("INSERT INTO identity.devices")) return { rows: [{ id: deviceId }] };
     if (sql.includes("INSERT INTO identity.auth_sessions")) return { rows: [] };
-    if (sql.includes("FROM identity.auth_sessions s")) return { rows: [{ user_id: userId, device_id: deviceId }] };
+    if (sql.includes("FROM identity.auth_sessions s")) return { rows: [{ user_id: userId, device_id: deviceId, device_status: "active", session_revoked_at: null }] };
     if (sql.includes("ledger.create_relationship_invitation")) {
       return { rows: [{ invitation_id: invitationId, relationship_id: relationshipId, status: "pending", expires_at: new Date("2026-11-09T12:00:00Z"), created: true }] };
     }
@@ -236,7 +236,7 @@ test("relationship creation, invitation lookup, bilateral acceptance and scoped 
 
 test("relationship creation rejects incompatible business roles before database mutation", async () => {
   const pool = makePool(async (sql: string) => {
-    if (sql.includes("FROM identity.auth_sessions s")) return { rows: [{ user_id: userId, device_id: deviceId }] };
+    if (sql.includes("FROM identity.auth_sessions s")) return { rows: [{ user_id: userId, device_id: deviceId, device_status: "active", session_revoked_at: null }] };
     return { rows: [] };
   });
   const app = buildIdentityApi({
@@ -249,7 +249,7 @@ test("relationship creation rejects incompatible business roles before database 
     if (sql.includes("get_or_create_user_by_phone")) return { rows: [{ user_id: userId }] };
     if (sql.includes("INSERT INTO identity.devices")) return { rows: [{ id: deviceId }] };
     if (sql.includes("INSERT INTO identity.auth_sessions")) return { rows: [] };
-    if (sql.includes("FROM identity.auth_sessions s")) return { rows: [{ user_id: userId, device_id: deviceId }] };
+    if (sql.includes("FROM identity.auth_sessions s")) return { rows: [{ user_id: userId, device_id: deviceId, device_status: "active", session_revoked_at: null }] };
     return { rows: [] };
   });
   const authApp = buildIdentityApi({
@@ -343,7 +343,7 @@ test("logout revokes every live session and refresh token on the authenticated d
     if (sql.includes("INSERT INTO identity.devices")) return { rows: [{ id: deviceId }] };
     if (sql.includes("INSERT INTO identity.auth_sessions")) return { rows: [] };
     if (sql.includes("INSERT INTO identity.refresh_tokens")) return { rows: [] };
-    if (sql.includes("FROM identity.auth_sessions s")) return { rows: [{ user_id: userId, device_id: deviceId }] };
+    if (sql.includes("FROM identity.auth_sessions s")) return { rows: [{ user_id: userId, device_id: deviceId, device_status: "active", session_revoked_at: null }] };
     if (sql.includes("identity.revoke_device_sessions")) return { rows: [{ revoked: 1 }] };
     return { rows: [] };
   });
@@ -384,4 +384,131 @@ test("expired access tokens are rejected before any database lookup", async () =
   );
   assert.equal(await resolver({ headers: { authorization: "Bearer " + token } } as any), null);
   assert.equal(calls, 0);
+});
+
+test("session resolver reports a revoked device explicitly", async () => {
+  const claims = {
+    iss: "shared-commercial-ledger", aud: "shared-ledger-mobile", sub: userId,
+    did: deviceId, jti: sessionId, iat: 1_800_000_000, exp: 1_800_000_900
+  };
+  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify(claims)).toString("base64url");
+  const input = header + "." + payload;
+  const token = input + "." + createHmac("sha256", accessSecret).update(input).digest("base64url");
+  const resolver = createSessionPrincipalResolver(
+    makePool(async () => ({
+      rows: [{ user_id: userId, device_id: deviceId, device_status: "revoked", session_revoked_at: new Date() }]
+    })),
+    accessSecret, () => 1_800_000_100_000
+  );
+  await assert.rejects(
+    () => resolver({ headers: { authorization: "Bearer " + token } } as any),
+    /device_revoked/
+  );
+});
+
+test("session resolver returns null for a logged-out session on an active device", async () => {
+  const claims = {
+    iss: "shared-commercial-ledger", aud: "shared-ledger-mobile", sub: userId,
+    did: deviceId, jti: sessionId, iat: 1_800_000_000, exp: 1_800_000_900
+  };
+  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify(claims)).toString("base64url");
+  const input = header + "." + payload;
+  const token = input + "." + createHmac("sha256", accessSecret).update(input).digest("base64url");
+  const resolver = createSessionPrincipalResolver(
+    makePool(async () => ({
+      rows: [{ user_id: userId, device_id: deviceId, device_status: "active", session_revoked_at: new Date() }]
+    })),
+    accessSecret, () => 1_800_000_100_000
+  );
+  assert.equal(await resolver({ headers: { authorization: "Bearer " + token } } as any), null);
+});
+
+test("device listing and append-only lifecycle events are scoped to the authenticated user", async () => {
+  const eventId = "89000000-0000-0000-0000-000000000001";
+  const sqlCalls: Array<{ sql: string; values: unknown[] }> = [];
+  const pool = makePool(async (sql: string, values: unknown[] = []) => {
+    sqlCalls.push({ sql, values });
+    if (sql.includes("consume_otp_challenge")) return { rows: [{ verified: true }] };
+    if (sql.includes("get_or_create_user_by_phone")) return { rows: [{ user_id: userId }] };
+    if (sql.includes("INSERT INTO identity.devices")) return { rows: [{ id: deviceId }] };
+    if (sql.includes("INSERT INTO identity.auth_sessions")) return { rows: [] };
+    if (sql.includes("INSERT INTO identity.refresh_tokens")) return { rows: [] };
+    if (sql.includes("FROM identity.auth_sessions s")) {
+      return { rows: [{ user_id: userId, device_id: deviceId, device_status: "active", session_revoked_at: null }] };
+    }
+    if (sql.includes("FROM identity.devices WHERE user_id")) {
+      return { rows: [
+        { id: deviceId, device_label: "Current", platform: "android", status: "active",
+          registered_at: "2026-11-02T10:00:00.000Z", last_seen_at: "2026-11-03T10:00:00.000Z", revoked_at: null },
+        { id: "71000000-0000-0000-0000-000000000002", device_label: "Old", platform: "ios", status: "revoked",
+          registered_at: "2026-10-01T10:00:00.000Z", last_seen_at: "2026-10-02T10:00:00.000Z", revoked_at: "2026-10-03T10:00:00.000Z" }
+      ] };
+    }
+    if (sql.includes("SELECT id FROM identity.devices WHERE id")) return { rows: [{ id: deviceId }] };
+    if (sql.includes("FROM identity.device_events")) {
+      return { rows: [
+        { id: eventId, event_type: "device.registered", details: { platform: "android" }, created_at: "2026-11-02T10:00:00.000Z" },
+        { id: "89000000-0000-0000-0000-000000000002", event_type: "session.started", details: { sessionId }, created_at: "2026-11-02T10:00:01.000Z" }
+      ] };
+    }
+    return { rows: [] };
+  });
+  const app = buildIdentityApi({
+    pool, otpDelivery: { sendCode: async () => undefined }, otpPepper, accessTokenSecret: accessSecret,
+    now: () => 1_800_000_000_000
+  });
+  const login = await app.inject({
+    method: "POST", url: "/v1/auth/otp/verify",
+    payload: { phoneE164: phone, code: "123456", deviceId, deviceLabel: "Current", platform: "android" }
+  });
+  const token = (JSON.parse(login.body) as { accessToken: string }).accessToken;
+  const headers = { authorization: "Bearer " + token };
+
+  const devices = await app.inject({ method: "GET", url: "/v1/devices", headers });
+  assert.equal(devices.statusCode, 200);
+  const devicesBody = JSON.parse(devices.body) as { devices: Array<{ id: string; isCurrent: boolean; status: string }> };
+  assert.equal(devicesBody.devices.length, 2);
+  assert.equal(devicesBody.devices[0]?.isCurrent, true);
+  assert.equal(devicesBody.devices[1]?.status, "revoked");
+
+  const events = await app.inject({ method: "GET", url: "/v1/devices/" + deviceId + "/events?limit=10", headers });
+  assert.equal(events.statusCode, 200);
+  const eventsBody = JSON.parse(events.body) as { deviceId: string; events: Array<{ type: string }> };
+  assert.equal(eventsBody.deviceId, deviceId);
+  assert.deepEqual(eventsBody.events.map(event => event.type), ["device.registered", "session.started"]);
+  const eventQuery = sqlCalls.find(call => call.sql.includes("FROM identity.device_events"));
+  assert.deepEqual(eventQuery?.values, [deviceId, userId, 10]);
+  await app.close();
+});
+
+test("device events are hidden for a device owned by another user", async () => {
+  const pool = makePool(async (sql: string) => {
+    if (sql.includes("consume_otp_challenge")) return { rows: [{ verified: true }] };
+    if (sql.includes("get_or_create_user_by_phone")) return { rows: [{ user_id: userId }] };
+    if (sql.includes("INSERT INTO identity.devices")) return { rows: [{ id: deviceId }] };
+    if (sql.includes("INSERT INTO identity.auth_sessions")) return { rows: [] };
+    if (sql.includes("INSERT INTO identity.refresh_tokens")) return { rows: [] };
+    if (sql.includes("FROM identity.auth_sessions s")) {
+      return { rows: [{ user_id: userId, device_id: deviceId, device_status: "active", session_revoked_at: null }] };
+    }
+    if (sql.includes("SELECT id FROM identity.devices WHERE id")) return { rows: [] };
+    return { rows: [] };
+  });
+  const app = buildIdentityApi({
+    pool, otpDelivery: { sendCode: async () => undefined }, otpPepper, accessTokenSecret: accessSecret,
+    now: () => 1_800_000_000_000
+  });
+  const login = await app.inject({
+    method: "POST", url: "/v1/auth/otp/verify",
+    payload: { phoneE164: phone, code: "123456", deviceId, deviceLabel: "Current", platform: "android" }
+  });
+  const token = (JSON.parse(login.body) as { accessToken: string }).accessToken;
+  const response = await app.inject({
+    method: "GET", url: "/v1/devices/71000000-0000-0000-0000-000000000099/events",
+    headers: { authorization: "Bearer " + token }
+  });
+  assert.equal(response.statusCode, 404);
+  await app.close();
 });
