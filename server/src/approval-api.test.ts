@@ -87,3 +87,62 @@ test("maps stale-version and already-decided conflicts to 409", async () => {
   assert.equal(response.statusCode, 409);
   await app.close();
 });
+
+
+const settlementUrl = "/v1/relationships/" + relationshipId + "/settlement-reset-requests";
+
+test("creates a settlement reset request using only the authenticated user", async () => {
+  let values: unknown[] = [];
+  const app = buildApprovalApi({
+    pool: makePool(async (_sql, bound) => {
+      values = bound;
+      return { rows: [{ request_id: decisionId }] };
+    }),
+    resolvePrincipal: async () => ({ userId, deviceId })
+  });
+  const response = await app.inject({
+    method: "POST", url: settlementUrl,
+    headers: { "idempotency-key": decisionId },
+    payload: {}
+  });
+  assert.equal(response.statusCode, 201);
+  assert.deepEqual(JSON.parse(response.body), { status: "requested", requestId: decisionId });
+  assert.deepEqual(values, [decisionId, relationshipId, userId]);
+  await app.close();
+});
+
+test("rejects settlement reset requests when the ledger is not fully settled", async () => {
+  const app = buildApprovalApi({
+    pool: makePool(async () => {
+      throw Object.assign(new Error("unpaid obligation"), { code: "23514" });
+    }),
+    resolvePrincipal: async () => ({ userId, deviceId })
+  });
+  const response = await app.inject({
+    method: "POST", url: settlementUrl,
+    headers: { "idempotency-key": decisionId },
+    payload: {}
+  });
+  assert.equal(response.statusCode, 409);
+  assert.deepEqual(JSON.parse(response.body), { error: "settlement_not_complete" });
+  await app.close();
+});
+
+test("rejects unauthenticated settlement reset requests before calling PostgreSQL", async () => {
+  let called = false;
+  const app = buildApprovalApi({
+    pool: makePool(async () => {
+      called = true;
+      return { rows: [{ request_id: decisionId }] };
+    }),
+    resolvePrincipal: async () => null
+  });
+  const response = await app.inject({
+    method: "POST", url: settlementUrl,
+    headers: { "idempotency-key": decisionId },
+    payload: {}
+  });
+  assert.equal(response.statusCode, 401);
+  assert.equal(called, false);
+  await app.close();
+});
