@@ -129,9 +129,9 @@ BEGIN
   WHERE operation_id = p_operation_id;
 
   INSERT INTO ledger.relationship_events (
-    relationship_id, server_sequence, event_id, operation_id, event_type, event_payload
+    relationship_id, sync_shard, server_sequence, event_id, operation_id, event_type, event_payload
   ) VALUES (
-    p_relationship_id, next_sequence, gen_random_uuid(), p_operation_id, 'operation.created',
+    p_relationship_id, next_shard, next_sequence, gen_random_uuid(), p_operation_id, 'operation.created',
     jsonb_build_object(
       'operationId', p_operation_id,
       'operationType', p_operation_type,
