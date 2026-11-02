@@ -166,7 +166,7 @@ test("relationship creation, invitation lookup, bilateral acceptance and scoped 
     if (sql.includes("INSERT INTO identity.auth_sessions")) return { rows: [] };
     if (sql.includes("FROM identity.auth_sessions s")) return { rows: [{ user_id: userId, device_id: deviceId }] };
     if (sql.includes("ledger.create_relationship_invitation")) {
-      return { rows: [{ invitation_id: invitationId, relationship_id: relationshipId, status: "pending" }] };
+      return { rows: [{ invitation_id: invitationId, relationship_id: relationshipId, status: "pending", expires_at: new Date("2026-11-09T12:00:00Z"), created: true }] };
     }
     if (sql.includes("expire_relationship_invitations")) return { rows: [{ expire_relationship_invitations: 0 }] };
     if (sql.includes("FROM ledger.relationship_invitations ri")) {
