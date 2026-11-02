@@ -119,7 +119,7 @@ class AuthRequiredTransport implements SyncTransport {
   @override
   Future<SyncEventPage> pullEvents({
     required String relationshipId,
-    required int after,
+    required Map<int,int> cursors,
     required int limit,
   }) async {
     return SyncEventPage(events: const [], nextCursor: cursors, hasMore: false);
