@@ -133,3 +133,26 @@ Run #23 showed a stronger 50-worker result after migration 006 (189.57 lifecycle
 - Migration 006 is retained as a correctness-preserving query/index alignment improvement; PostgreSQL invariant tests pass.
 - **A repeatable throughput or latency improvement is not established.**
 - Do not use these measurements to claim capacity. Next performance work requires repeated 60–300 second runs, fixed runner conditions, hot-relationship skew, and explicit CPU/WAL attribution.
+
+
+## Diagnostic follow-up — 2026-11-02
+
+The existing 10/50-worker profiles already establish a reproducible *symptom* (financial lifecycle saturation) but do not yet establish a single root cause. The recorded samples show CPU/running most frequently, with WALWrite/WALSync, WALInsert, Lock/extend, LockManager and buffer waits. The allocation approval/posting stage has the highest measured p95 in the earlier profile. This is not enough evidence to attribute the bottleneck exclusively to party-account locks, relationship sequence counters, journal triggers, or WAL.
+
+The updated `server/bench/financial-profile.mjs` now captures during each phase:
+- grouped active sessions from `pg_stat_activity`, including wait event and longest query age;
+- grouped granted and waiting lock counts from `pg_locks`;
+- deltas from `pg_stat_wal` and `pg_stat_database`;
+- `pg_stat_statements` aggregate call/time/buffer/temp-write deltas when the extension is loaded;
+- the existing per-stage lifecycle latency samples.
+
+### Root-cause status
+
+| Candidate | Evidence so far | Conclusion |
+|---|---|---|
+| Allocation/account locks | Allocation approval was the slowest stage; Lock/extend and LockManager samples occurred | Plausible contributor; not isolated |
+| Relationship sequence counters | Every accepted operation advances a relationship sequence | Possible serialization point; not measured separately yet |
+| Journal triggers | Credit charge, payment and allocation approvals synchronously materialize journal entries | Work is on critical path; trigger cost needs statement/stage attribution |
+| WAL | WALWrite/WALSync/WALInsert waits were sampled and WAL counters are now captured | Confirmed WAL activity/waits, but not proven dominant |
+
+Do not claim a single root cause or a 50-worker capacity target until the instrumented CI run completes and the resulting samples/statements are reviewed. A missing `pg_stat_statements` preload must be treated as an instrumentation limitation, not as zero statement cost.

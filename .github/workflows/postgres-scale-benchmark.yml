@@ -14,20 +14,6 @@ jobs:
   scale-benchmark:
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: ledger_test
-          POSTGRES_PASSWORD: ledger_test
-          POSTGRES_DB: ledger_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U ledger_test -d ledger_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -39,6 +25,24 @@ jobs:
           sudo apt-get install -y postgresql-client
           nproc
           free -h
+      - name: Start PostgreSQL with pg_stat_statements preloaded
+        run: |
+          docker run -d --name ledger-bench-postgres \
+            -e POSTGRES_USER=ledger_test \
+            -e POSTGRES_PASSWORD=ledger_test \
+            -e POSTGRES_DB=ledger_test \
+            -p 5432:5432 postgres:16 \
+            -c shared_preload_libraries=pg_stat_statements
+          for attempt in $(seq 1 30); do
+            if pg_isready -h localhost -U ledger_test -d ledger_test; then exit 0; fi
+            sleep 2
+          done
+          docker logs ledger-bench-postgres
+          exit 1
+      - name: Enable pg_stat_statements
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS pg_stat_statements"
       - name: Install benchmark dependencies
         working-directory: server
         run: npm install --no-package-lock --no-audit --no-fund
