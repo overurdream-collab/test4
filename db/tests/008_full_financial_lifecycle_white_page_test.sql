@@ -191,7 +191,7 @@ SELECT ledger.decide_operation(
  1,'approved','new cycle payment confirmed'
 );
 
-DO $$
+DO $
 BEGIN
   BEGIN
     PERFORM * FROM ledger.accept_operation(
@@ -208,12 +208,19 @@ BEGIN
       ),
       0,1,now()
     );
+    PERFORM ledger.decide_operation(
+      '67000000-0000-0000-0000-000000000005',
+      '17000000-0000-0000-0000-000000000001',
+      '37000000-0000-0000-0000-000000000005',
+      '27000000-0000-0000-0000-000000000001',
+      1,'approved','must fail because allocation crosses cycles'
+    );
     RAISE EXCEPTION 'Cross-cycle allocation unexpectedly succeeded';
   EXCEPTION WHEN check_violation THEN
     IF SQLERRM NOT LIKE 'Allocation must stay within one account cycle%' THEN RAISE; END IF;
   END;
 END;
-$$;
+$;
 
 ROLLBACK;
 SELECT 'full financial lifecycle and white-page reset tests passed' AS result;
