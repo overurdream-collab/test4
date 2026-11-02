@@ -62,10 +62,10 @@ $$;
 -- Expired challenges cannot be consumed.
 INSERT INTO identity.otp_challenges(id,phone_e164,code_hash,status,expires_at)
 VALUES('83000000-0000-0000-0000-000000000004','+967771234571',
-decode(repeat('78',32),'hex'),'delivered',now()-interval '1 minute');
+decode(repeat('78',32),'hex'),'delivered',now()+interval '1 minute');
 DO $$
 BEGIN
- IF identity.consume_otp_challenge('+967771234571',decode(repeat('78',32),'hex')) THEN
+ IF identity.consume_otp_challenge('+967771234571',decode(repeat('78',32),'hex'),now()+interval '2 minutes') THEN
   RAISE EXCEPTION 'Expired OTP unexpectedly accepted';
  END IF;
  IF (SELECT status FROM identity.otp_challenges WHERE id='83000000-0000-0000-0000-000000000004')<>'expired' THEN
