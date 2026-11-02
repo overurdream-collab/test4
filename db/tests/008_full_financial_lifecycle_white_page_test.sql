@@ -191,29 +191,38 @@ SELECT ledger.decide_operation(
  1,'approved','new cycle payment confirmed'
 );
 
-DO $$BEGIN
+DO $$
+DECLARE old_payment uuid; old_obligation uuid;
+BEGIN
+  SELECT payment_id,obligation_id INTO old_payment,old_obligation FROM lifecycle_ids;
+
+  -- Create an approved allocation command in the new cycle, then deliberately
+  -- try to attach old-cycle financial records to that source operation.
+  PERFORM * FROM ledger.accept_operation(
+    '37000000-0000-0000-0000-000000000005',
+    '17000000-0000-0000-0000-000000000001',
+    '27000000-0000-0000-0000-000000000002',
+    '77000000-0000-0000-0000-000000000005',
+    'allocation', decode(repeat('c5',32),'hex'),
+    jsonb_build_object('paymentId',old_payment,'obligationId',old_obligation,'amountMinor',1),
+    0,1,now()
+  );
+  PERFORM ledger.decide_operation(
+    '67000000-0000-0000-0000-000000000005',
+    '17000000-0000-0000-0000-000000000001',
+    '37000000-0000-0000-0000-000000000005',
+    '27000000-0000-0000-0000-000000000001',
+    1,'approved','must fail because allocation crosses cycles'
+  );
+
   BEGIN
-    PERFORM * FROM ledger.accept_operation(
-      '37000000-0000-0000-0000-000000000005',
-      '17000000-0000-0000-0000-000000000001',
-      '27000000-0000-0000-0000-000000000002',
-      '77000000-0000-0000-0000-000000000005',
-      'allocation', decode(repeat('c5',32),'hex'),
-      jsonb_build_object(
-        'paymentId',(SELECT id FROM ledger.payments
-                     WHERE source_operation_id='37000000-0000-0000-0000-000000000004'),
-        'obligationId',(SELECT obligation_id FROM lifecycle_ids),
-        'amountMinor',100
-      ),
-      0,1,now()
-    );
-    PERFORM ledger.decide_operation(
-      '67000000-0000-0000-0000-000000000005',
-      '17000000-0000-0000-0000-000000000001',
-      '37000000-0000-0000-0000-000000000005',
-      '27000000-0000-0000-0000-000000000001',
-      1,'approved','must fail because allocation crosses cycles'
-    );
+    INSERT INTO ledger.allocations
+      (id,relationship_id,payment_id,obligation_id,source_operation_id,currency,amount_minor)
+    VALUES
+      ('78000000-0000-0000-0000-000000000001',
+       '17000000-0000-0000-0000-000000000001',
+       old_payment,old_obligation,
+       '37000000-0000-0000-0000-000000000005','YER',1);
     RAISE EXCEPTION 'Cross-cycle allocation unexpectedly succeeded';
   EXCEPTION WHEN check_violation THEN
     IF SQLERRM NOT LIKE 'Allocation must stay within one account cycle%' THEN RAISE; END IF;
