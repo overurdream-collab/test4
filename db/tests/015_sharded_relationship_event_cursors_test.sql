@@ -33,6 +33,9 @@ BEGIN
      WHERE relationship_id=rel AND sync_shard=shard)<>2 THEN
   RAISE EXCEPTION 'Operation state event did not stay on its original shard';
  END IF;
+ FOR s IN 0..7 LOOP
+  PERFORM ledger.next_relationship_sequence(rel,s::smallint);
+ END LOOP;
  IF (SELECT count(DISTINCT sync_shard) FROM ledger.relationship_sync_shard_counters
      WHERE relationship_id=rel)<>8 THEN
   RAISE EXCEPTION 'Expected eight independent sequence counters';
