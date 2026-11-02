@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
+import { createHash } from "node:crypto";
 import type { Pool } from "pg";
 
 export type AuthenticatedPrincipal = {
