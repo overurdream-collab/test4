@@ -36,10 +36,10 @@ SELECT
   'awaiting_counterparty',
   0,
   1,
-  now() - ((n % 86400)::text || ' seconds')::interval,
+  TIMESTAMPTZ '2026-11-02 00:00:00+00' - ((n % 86400)::text || ' seconds')::interval,
   md5('bench-device-' || n)::uuid,
   1,
-  now(),
+  TIMESTAMPTZ '2026-11-02 00:00:00+00',
   jsonb_build_object('amountMinor', 1000 + (n % 1000), 'currency', 'YER'),
   ((n - 1) / 1000) + 1
 FROM generate_series(1, 1000000) AS gs(n);
