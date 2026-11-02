@@ -82,7 +82,7 @@ BEGIN
   END IF;
 
   IF (SELECT status FROM ledger.relationships
-      WHERE id='16000000-0000-0000-0000-000000000001') <> 'closed'
+      WHERE id='16000000-0000-0000-0000-000000000001') <> 'active'
      OR (SELECT closed_at FROM ledger.relationships
          WHERE id='16000000-0000-0000-0000-000000000001') IS NULL THEN
     RAISE EXCEPTION 'Approved reset did not close relationship';
