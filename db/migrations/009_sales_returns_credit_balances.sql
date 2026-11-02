@@ -40,3 +40,5 @@ BEGIN
  RETURN NEW;
 END; $$;
 CREATE TRIGGER sales_returns_post_to_journal AFTER INSERT ON ledger.sales_returns FOR EACH ROW EXECUTE FUNCTION ledger.post_sales_return_to_journal();
+
+-- Sales returns are posted only after the normal bilateral approval transition.
