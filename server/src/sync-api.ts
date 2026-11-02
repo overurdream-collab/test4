@@ -188,7 +188,7 @@ export function buildSyncApi({ pool, resolvePrincipal }: Dependencies): FastifyI
         if (request.query.cursors) {
           const parsed = JSON.parse(request.query.cursors) as Record<string, unknown>;
           for (let shard = 0; shard < 8; shard++) {
-            const value = parsed[String(shard)];
+            const value = parsed[String(shard)] ?? 0;
             if (!Number.isSafeInteger(value) || Number(value) < 0) throw new Error("invalid cursor");
             cursors[String(shard)] = Number(value);
           }
