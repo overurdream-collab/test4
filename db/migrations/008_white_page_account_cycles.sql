@@ -16,6 +16,9 @@ CREATE TABLE ledger.account_cycles (
          (status = 'archived' AND ended_at IS NOT NULL))
 );
 
+CREATE UNIQUE INDEX account_cycles_one_active_per_relationship_idx
+  ON ledger.account_cycles (relationship_id) WHERE status = 'active';
+
 -- Create the first cycle for every existing relationship. Existing financial
 -- history remains together in that initial cycle; nothing is deleted or moved.
 INSERT INTO ledger.account_cycles
@@ -36,6 +39,34 @@ ALTER TABLE ledger.relationships
   ADD CONSTRAINT relationships_current_cycle_fk
     FOREIGN KEY (current_cycle_id, id)
     REFERENCES ledger.account_cycles (id, relationship_id);
+
+-- New relationships are inserted without a cycle ID by existing callers.
+-- Create their first cycle after the relationship row exists, then set the pointer
+-- before the transaction can commit.
+ALTER TABLE ledger.relationships
+  ALTER COLUMN current_cycle_id DROP NOT NULL;
+
+CREATE OR REPLACE FUNCTION ledger.initialize_relationship_account_cycle()
+RETURNS trigger LANGUAGE plpgsql AS $init$
+DECLARE initial_cycle_id uuid;
+BEGIN
+  IF NEW.current_cycle_id IS NULL THEN
+    INSERT INTO ledger.account_cycles
+      (relationship_id, cycle_number, title, status)
+    VALUES (NEW.id, 1, 'الدورة الأولى', 'active')
+    RETURNING id INTO initial_cycle_id;
+
+    UPDATE ledger.relationships
+    SET current_cycle_id = initial_cycle_id
+    WHERE id = NEW.id;
+  END IF;
+  RETURN NEW;
+END;
+$init$;
+
+CREATE TRIGGER relationships_initialize_account_cycle
+AFTER INSERT ON ledger.relationships
+FOR EACH ROW EXECUTE FUNCTION ledger.initialize_relationship_account_cycle();
 
 ALTER TABLE ledger.operations ADD COLUMN cycle_id uuid;
 UPDATE ledger.operations o
@@ -126,7 +157,8 @@ FOR EACH ROW EXECUTE FUNCTION ledger.assign_journal_account_cycle();
 
 -- Keep the historical all-time view, and add a cycle-scoped view for the
 -- current white page and archived statements.
-CREATE OR REPLACE VIEW ledger.member_currency_positions AS
+DROP VIEW ledger.member_currency_positions;
+CREATE VIEW ledger.member_currency_positions AS
 SELECT
   jt.relationship_id,
   jt.cycle_id,
@@ -412,6 +444,69 @@ BEGIN
       'archivedCycleId', (SELECT cycle_id FROM ledger.settlement_requests WHERE id=NEW.request_id),
       'currentCycleId', current_cycle,
       'decidedAt', NEW.decided_at
+    )
+  );
+  RETURN NEW;
+END;
+$$;
+
+
+-- Ensure operation events carry the cycle identifier so offline clients can
+-- route each event to the current page or its archived statement.
+CREATE OR REPLACE FUNCTION ledger.attach_event_cycle_id()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE source_cycle uuid;
+BEGIN
+  IF NEW.operation_id IS NOT NULL THEN
+    SELECT cycle_id INTO source_cycle FROM ledger.operations
+    WHERE relationship_id = NEW.relationship_id
+      AND operation_id = NEW.operation_id;
+    IF source_cycle IS NOT NULL THEN
+      NEW.event_payload := jsonb_set(
+        NEW.event_payload, '{cycleId}', to_jsonb(source_cycle::text), true
+      );
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER relationship_events_attach_cycle_id
+BEFORE INSERT ON ledger.relationship_events
+FOR EACH ROW EXECUTE FUNCTION ledger.attach_event_cycle_id();
+
+-- Keep allocations within one account cycle.
+CREATE OR REPLACE FUNCTION ledger.assert_allocation_same_cycle()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE pc uuid; oc uuid; ac uuid;
+BEGIN
+ SELECT o.cycle_id INTO pc FROM ledger.payments p JOIN ledger.operations o ON o.operation_id=p.source_operation_id WHERE p.id=NEW.payment_id AND p.relationship_id=NEW.relationship_id;
+ SELECT o.cycle_id INTO oc FROM ledger.obligations b JOIN ledger.operations o ON o.operation_id=b.source_operation_id WHERE b.id=NEW.obligation_id AND b.relationship_id=NEW.relationship_id;
+ SELECT cycle_id INTO ac FROM ledger.operations WHERE operation_id=NEW.source_operation_id AND relationship_id=NEW.relationship_id;
+ IF pc IS NULL OR oc IS NULL OR ac IS NULL OR pc <> oc OR pc <> ac THEN
+   RAISE EXCEPTION 'Allocation must stay within one account cycle' USING ERRCODE='23514';
+ END IF;
+ RETURN NEW;
+END;
+$$;
+CREATE TRIGGER allocations_must_stay_within_cycle BEFORE INSERT ON ledger.allocations FOR EACH ROW EXECUTE FUNCTION ledger.assert_allocation_same_cycle();
+
+
+CREATE OR REPLACE FUNCTION ledger.append_settlement_request_event()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE next_sequence bigint;
+BEGIN
+  next_sequence := ledger.next_relationship_sequence(NEW.relationship_id);
+  INSERT INTO ledger.relationship_events (
+    relationship_id, server_sequence, event_id, operation_id, event_type, event_payload
+  ) VALUES (
+    NEW.relationship_id, next_sequence, gen_random_uuid(), NULL,
+    'settlement.reset_requested',
+    jsonb_build_object(
+      'requestId', NEW.id,
+      'requestedByUserId', NEW.requested_by_user_id,
+      'cycleId', NEW.cycle_id,
+      'requestedAt', NEW.requested_at
     )
   );
   RETURN NEW;

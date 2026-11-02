@@ -14,6 +14,24 @@ VALUES
  ('16000000-0000-0000-0000-000000000002','26000000-0000-0000-0000-000000000003','seller','active',true),
  ('16000000-0000-0000-0000-000000000002','26000000-0000-0000-0000-000000000004','buyer','active',true);
 
+-- Record a completed pre-reset operation so the archived cycle remains auditable.
+SELECT * FROM ledger.accept_operation(
+ '36000000-0000-0000-0000-000000000011',
+ '16000000-0000-0000-0000-000000000001',
+ '26000000-0000-0000-0000-000000000001',
+ '76000000-0000-0000-0000-000000000011',
+ 'supply', decode(repeat('b0',32),'hex'),
+ '{"description":"completed activity before white-page reset"}'::jsonb,
+ 0,1,now()
+);
+SELECT ledger.decide_operation(
+ '66000000-0000-0000-0000-000000000011',
+ '16000000-0000-0000-0000-000000000001',
+ '36000000-0000-0000-0000-000000000011',
+ '26000000-0000-0000-0000-000000000002',
+ 1,'approved','confirmed before cycle reset'
+);
+
 -- Party A requests reset after the existing balance gate has passed.
 SELECT ledger.request_settlement_reset(
  '86000000-0000-0000-0000-000000000001',
@@ -54,7 +72,7 @@ BEGIN
 END;
 $$;
 
--- Only the other party can approve; approval closes the relationship.
+-- Only the other party can approve; approval starts a new white page.
 DO $$
 DECLARE decision_result text;
 BEGIN
@@ -82,10 +100,9 @@ BEGIN
   END IF;
 
   IF (SELECT status FROM ledger.relationships
-      WHERE id='16000000-0000-0000-0000-000000000001') <> 'closed'
-     OR (SELECT closed_at FROM ledger.relationships
-         WHERE id='16000000-0000-0000-0000-000000000001') IS NULL THEN
-    RAISE EXCEPTION 'Approved reset did not close relationship';
+      WHERE id='16000000-0000-0000-0000-000000000001') <> 'active'
+     THEN
+    RAISE EXCEPTION 'Relationship must remain active after white-page reset';
   END IF;
 
   -- A delayed retry of the original request remains idempotent after closure.
@@ -110,22 +127,43 @@ BEGIN
 END;
 $$;
 
+SELECT * FROM ledger.accept_operation(
+  '36000000-0000-0000-0000-000000000002',
+  '16000000-0000-0000-0000-000000000001',
+  '26000000-0000-0000-0000-000000000002',
+  '76000000-0000-0000-0000-000000000002',
+  'supply', decode(repeat('b2',32),'hex'),
+  '{"description":"first entry on the new white page"}'::jsonb,
+  0,1,now()
+);
+
 DO $$
+DECLARE active_cycle uuid; operation_cycle uuid;
 BEGIN
-  BEGIN
-    PERFORM * FROM ledger.accept_operation(
-      '36000000-0000-0000-0000-000000000002',
-      '16000000-0000-0000-0000-000000000001',
-      '26000000-0000-0000-0000-000000000002',
-      '76000000-0000-0000-0000-000000000002',
-      'supply', decode(repeat('b2',32),'hex'),
-      '{"description":"closed relationship"}'::jsonb,
-      0,1,now()
-    );
-    RAISE EXCEPTION 'Operation unexpectedly succeeded after relationship closure';
-  EXCEPTION WHEN SQLSTATE '55000' THEN
-    IF SQLERRM <> 'Relationship is not active' THEN RAISE; END IF;
-  END;
+  SELECT current_cycle_id INTO active_cycle FROM ledger.relationships
+  WHERE id='16000000-0000-0000-0000-000000000001';
+  SELECT cycle_id INTO operation_cycle FROM ledger.operations
+  WHERE operation_id='36000000-0000-0000-0000-000000000002';
+  IF operation_cycle <> active_cycle THEN
+    RAISE EXCEPTION 'New operation was not assigned to the new white-page cycle';
+  END IF;
+  IF (SELECT status FROM ledger.relationships
+      WHERE id='16000000-0000-0000-0000-000000000001') <> 'active' THEN
+    RAISE EXCEPTION 'Relationship must remain active after white-page reset';
+  END IF;
+  IF (SELECT count(*) FROM ledger.account_cycles
+      WHERE relationship_id='16000000-0000-0000-0000-000000000001'
+        AND status='archived') <> 1 THEN
+    RAISE EXCEPTION 'Previous account cycle was not archived';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM ledger.operations
+    WHERE operation_id='36000000-0000-0000-0000-000000000011'
+      AND cycle_id=(SELECT cycle_id FROM ledger.settlement_requests
+                    WHERE id='86000000-0000-0000-0000-000000000001')
+  ) THEN
+    RAISE EXCEPTION 'Archived cycle history was not retained';
+  END IF;
 END;
 $$;
 

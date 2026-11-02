@@ -91,7 +91,11 @@ jobs:
         env:
           PGPASSWORD: ledger_test
         run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/migrations/007_settlement_reset_decisions.sql
-      - name: Run bilateral settlement reset decision tests
+      - name: Apply white-page account cycles migration
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/migrations/008_white_page_account_cycles.sql
+      - name: Run white-page account cycle tests
         env:
           PGPASSWORD: ledger_test
         run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/tests/007_settlement_reset_decisions_test.sql
