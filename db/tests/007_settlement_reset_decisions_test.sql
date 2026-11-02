@@ -54,7 +54,7 @@ BEGIN
 END;
 $$;
 
--- Only the other party can approve; approval closes the relationship.
+-- Only the other party can approve; approval starts a new white page.
 DO $$
 DECLARE decision_result text;
 BEGIN
