@@ -547,3 +547,32 @@
 - توحيد `PrincipalResolver` في تركيب الإنتاج مع approval/sync/identity.
 - مواءمة migration sharding من PR #42 مع ترقيم migrations الحالي قبل أي دمج.
 - لا UI ولا نشر ولا مزود SMS حقيقي ولا قاعدة إنتاجية.
+
+
+## إغلاق الخطوة 3 — دوران refresh token وتسجيل الخروج / 2026-11-03
+
+### الدمج
+- PR #44: https://github.com/overurdream-collab/test4/pull/44
+- Merge SHA: `46b20abf55189fa72d886852d16a0fd8e77f40bb`.
+- دُمج بعد نجاح كل الفحوصات المطلوبة.
+
+### نتائج CI
+- Ledger PostgreSQL tests Run `41538780233`: success — طبّق migration 012 وشغّل اختبار 013.
+  https://github.com/overurdream-collab/test4/actions/runs/41538780233
+- Approval API checks Run `41538780238`: success — typecheck و48 اختبار API.
+  https://github.com/overurdream-collab/test4/actions/runs/41538780238
+- Flutter CI Run `41538780410`: success — analyze واختبارات Flutter.
+  https://github.com/overurdream-collab/test4/actions/runs/41538780410
+
+### المنجز
+- refresh token rotation ذري مع تخزين HMAC-SHA256 فقط.
+- كشف إعادة الاستخدام وإبطال الجلسة وكل توكناتها.
+- `POST /v1/auth/refresh` و`POST /v1/auth/logout`.
+- إبطال refresh tokens عند إلغاء الجهاز.
+- اختبارات قاعدة البيانات 013 ووثيقة مقارنة مزودات OTP.
+
+### المتبقي
+- الخطوة 4: GET الأجهزة، سجل أحداث أجهزة غير قابل للتعديل، و403 لجهاز ملغى في sync.
+- توحيد PrincipalResolver الإنتاجي مع approval/sync/identity.
+- حل تعارض ترقيم migration مع فرع PR #42 غير المدمج قبل أي دمج له.
+- لا UI ولا نشر ولا مزود SMS حقيقي ولا قاعدة إنتاجية.
