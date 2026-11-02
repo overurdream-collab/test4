@@ -443,3 +443,19 @@ $$;
 CREATE TRIGGER relationship_events_attach_cycle_id
 BEFORE INSERT ON ledger.relationship_events
 FOR EACH ROW EXECUTE FUNCTION ledger.attach_event_cycle_id();
+
+-- Keep allocations within one account cycle.
+CREATE OR REPLACE FUNCTION ledger.assert_allocation_same_cycle()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE pc uuid; oc uuid; ac uuid;
+BEGIN
+ SELECT o.cycle_id INTO pc FROM ledger.payments p JOIN ledger.operations o ON o.operation_id=p.source_operation_id WHERE p.id=NEW.payment_id AND p.relationship_id=NEW.relationship_id;
+ SELECT o.cycle_id INTO oc FROM ledger.obligations b JOIN ledger.operations o ON o.operation_id=b.source_operation_id WHERE b.id=NEW.obligation_id AND b.relationship_id=NEW.relationship_id;
+ SELECT cycle_id INTO ac FROM ledger.operations WHERE operation_id=NEW.source_operation_id AND relationship_id=NEW.relationship_id;
+ IF pc IS NULL OR oc IS NULL OR ac IS NULL OR pc <> oc OR pc <> ac THEN
+   RAISE EXCEPTION 'Allocation must stay within one account cycle' USING ERRCODE='23514';
+ END IF;
+ RETURN NEW;
+END;
+$$;
+CREATE TRIGGER allocations_must_stay_within_cycle BEFORE INSERT ON ledger.allocations FOR EACH ROW EXECUTE FUNCTION ledger.assert_allocation_same_cycle();
