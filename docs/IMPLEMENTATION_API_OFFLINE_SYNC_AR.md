@@ -24,6 +24,7 @@
 | POST | /v1/relationships/{relationshipId}/payments | تسجيل دفعة وفق سياسة العلاقة |
 | POST | /v1/relationships/{relationshipId}/allocations | تخصيص مبلغ من دفعة إلى التزام محدد |
 | GET | /v1/relationships/{relationshipId}/balances | الرصيد المفتوح لكل عملة على حدة |
+| GET | /v1/relationships/{relationshipId}/account-cycles | الدورة الحالية والدورات المؤرشفة وأرصدة كل دورة |
 | GET | /v1/relationships/{relationshipId}/statement | كشف حساب قابل للاستكمال |
 
 ### ضوابط كل طلب
