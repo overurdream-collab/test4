@@ -141,3 +141,13 @@ jobs:
         env:
           PGPASSWORD: ledger_test
         run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/tests/012_relationship_invitations_test.sql
+
+      - name: Apply relationship sequence contention optimization
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/migrations/012_relationship_sequence_contention.sql
+
+      - name: Run relationship sequence contention tests
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/tests/013_relationship_sequence_contention_test.sql
