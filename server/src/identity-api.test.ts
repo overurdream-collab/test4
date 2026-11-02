@@ -14,10 +14,6 @@ const phone = "+967771234567";
 function makePool(query: (...args: any[]) => Promise<any>): Pool {
   return { query } as unknown as Pool;
 }
-function digest(value: string): Buffer {
-  return createHmac("sha256", accessSecret).update(value).digest();
-}
-
 test("OTP request stores only a digest and never returns the code", async () => {
   let storedHash: Buffer | undefined;
   let deliveredCode = "";
@@ -129,24 +125,32 @@ test("session resolver requires an active server session and active device", asy
 });
 
 test("revocation endpoint is scoped to the authenticated user's devices", async () => {
-  let values: unknown[] = [];
+  const sqlCalls: string[] = [];
+  const pool = makePool(async (sql: string) => {
+    sqlCalls.push(sql);
+    if (sql.includes("consume_otp_challenge")) return { rows: [{ verified: true }] };
+    if (sql.includes("get_or_create_user_by_phone")) return { rows: [{ user_id: userId }] };
+    if (sql.includes("INSERT INTO identity.devices")) return { rows: [{ id: deviceId }] };
+    if (sql.includes("INSERT INTO identity.auth_sessions")) return { rows: [] };
+    if (sql.includes("FROM identity.auth_sessions s")) return { rows: [{ user_id: userId, device_id: deviceId }] };
+    if (sql.includes("WITH revoked_device")) return { rows: [{ id: deviceId }] };
+    return { rows: [] };
+  });
   const app = buildIdentityApi({
-    pool: makePool(async (_sql: string, params: unknown[]) => {
-      values = params;
-      return { rows: [{ id: deviceId }] };
-    }),
-    otpDelivery: { sendCode: async () => undefined }, otpPepper, accessTokenSecret: accessSecret
+    pool, otpDelivery: { sendCode: async () => undefined }, otpPepper, accessTokenSecret: accessSecret,
+    now: () => 1_800_000_000_000
   });
-  // A valid principal is injected by stubbing the session query.
-  const authenticated = buildIdentityApi({
-    pool: makePool(async (sql: string, params: unknown[]) => {
-      if (sql.includes("identity.auth_sessions s")) return { rows: [{ user_id: userId, device_id: deviceId }] };
-      values = params;
-      return { rows: [{ id: deviceId }] };
-    }),
-    otpDelivery: { sendCode: async () => undefined }, otpPepper, accessTokenSecret: accessSecret
+  const login = await app.inject({
+    method: "POST", url: "/v1/auth/otp/verify",
+    payload: { phoneE164: phone, code: "123456", deviceId, deviceLabel: "Test", platform: "android" }
   });
-  void app;
-  void authenticated;
-  assert.equal(values.length, 0);
+  assert.equal(login.statusCode, 200);
+  const token = (JSON.parse(login.body) as { accessToken: string }).accessToken;
+  const response = await app.inject({
+    method: "POST", url: "/v1/devices/" + deviceId + "/revoke",
+    headers: { authorization: "Bearer " + token }, payload: {}
+  });
+  assert.equal(response.statusCode, 200);
+  assert.ok(sqlCalls.some(sql => sql.includes("WITH revoked_device")));
+  await app.close();
 });
