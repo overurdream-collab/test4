@@ -90,5 +90,24 @@ BEGIN
 END;
 $$;
 
+-- The rolling-window limits are enforced atomically by the database function.
+DO $otp_rate_limit$
+DECLARE i integer; reserved_id uuid;
+BEGIN
+ FOR i IN 1..3 LOOP
+  reserved_id:=identity.create_otp_challenge(
+   '+967771234572',decode(repeat('9a',32),'hex'),decode(repeat('8b',32),'hex'),now()+interval '5 minutes');
+  IF reserved_id IS NULL THEN
+   RAISE EXCEPTION 'OTP request % was unexpectedly rate limited',i;
+  END IF;
+ END LOOP;
+ reserved_id:=identity.create_otp_challenge(
+  '+967771234572',decode(repeat('9a',32),'hex'),decode(repeat('8b',32),'hex'),now()+interval '5 minutes');
+ IF reserved_id IS NOT NULL THEN
+  RAISE EXCEPTION 'Fourth OTP request within 15 minutes bypassed rate limit';
+ END IF;
+END;
+$otp_rate_limit$;
+
 ROLLBACK;
 SELECT 'identity foundation tests passed' AS result;
