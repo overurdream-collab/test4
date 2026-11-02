@@ -152,3 +152,122 @@ test("revocation endpoint is scoped to the authenticated user's devices", async 
   assert.ok(sqlCalls.some(sql => sql.includes("WITH revoked_device")));
   await app.close();
 });
+
+
+test("relationship creation, invitation lookup, bilateral acceptance and scoped listing", async () => {
+  const sqlCalls: Array<{ sql: string; values: unknown[] }> = [];
+  const relationshipId = "92000000-0000-0000-0000-000000000001";
+  const invitationId = "91000000-0000-0000-0000-000000000001";
+  const pool = makePool(async (sql: string, values: unknown[] = []) => {
+    sqlCalls.push({ sql, values });
+    if (sql.includes("consume_otp_challenge")) return { rows: [{ verified: true }] };
+    if (sql.includes("get_or_create_user_by_phone")) return { rows: [{ user_id: userId }] };
+    if (sql.includes("INSERT INTO identity.devices")) return { rows: [{ id: deviceId }] };
+    if (sql.includes("INSERT INTO identity.auth_sessions")) return { rows: [] };
+    if (sql.includes("FROM identity.auth_sessions s")) return { rows: [{ user_id: userId, device_id: deviceId }] };
+    if (sql.includes("ledger.create_relationship_invitation")) {
+      return { rows: [{ invitation_id: invitationId, relationship_id: relationshipId, status: "pending", expires_at: new Date("2026-11-09T12:00:00Z"), created: true }] };
+    }
+    if (sql.includes("expire_relationship_invitations")) return { rows: [{ expire_relationship_invitations: 0 }] };
+    if (sql.includes("FROM ledger.relationship_invitations ri")) {
+      return { rows: [{
+        invitation_id: invitationId, relationship_id: relationshipId,
+        relationship_type: "merchant_customer", inviter_user_id: "21000000-0000-0000-0000-000000000002",
+        inviter_display_name: "Merchant", inviter_phone_e164: "+967770000001",
+        inviter_role: "merchant", invitee_role: "customer",
+        created_at: new Date("2026-11-02T12:00:00Z"), expires_at: new Date("2026-11-09T12:00:00Z")
+      }] };
+    }
+    if (sql.includes("ledger.decide_relationship_invitation")) return { rows: [{ status: "accepted" }] };
+    if (sql.includes("FROM ledger.relationships r")) {
+      return { rows: [{
+        relationship_id: relationshipId, relationship_type: "merchant_customer",
+        status: "active", current_cycle_id: "96000000-0000-0000-0000-000000000001",
+        my_role: "customer", other_user_id: "21000000-0000-0000-0000-000000000002",
+        other_role: "merchant", other_display_name: "Merchant", other_phone_e164: "+967770000001"
+      }] };
+    }
+    return { rows: [] };
+  });
+  const app = buildIdentityApi({
+    pool, otpDelivery: { sendCode: async () => undefined }, otpPepper, accessTokenSecret: accessSecret,
+    now: () => 1_800_000_000_000
+  });
+  const login = await app.inject({
+    method: "POST", url: "/v1/auth/otp/verify",
+    payload: { phoneE164: phone, code: "123456", deviceId, deviceLabel: "Test", platform: "android" }
+  });
+  assert.equal(login.statusCode, 200);
+  const token = (JSON.parse(login.body) as { accessToken: string }).accessToken;
+  const headers = { authorization: "Bearer " + token };
+
+  const create = await app.inject({
+    method: "POST", url: "/v1/relationships",
+    headers: { ...headers, "idempotency-key": "91000000-0000-0000-0000-000000000099" },
+    payload: { inviteePhoneE164: "+967770000001", relationshipType: "merchant_customer", myRole: "merchant" }
+  });
+  assert.equal(create.statusCode, 201);
+  assert.equal(JSON.parse(create.body).relationshipId, relationshipId);
+  const createCall = sqlCalls.find(call => call.sql.includes("ledger.create_relationship_invitation"));
+  assert.ok(createCall);
+  assert.equal(createCall?.values[5], "merchant");
+  assert.equal(createCall?.values[6], "customer");
+
+  const invitations = await app.inject({ method: "GET", url: "/v1/relationship-invitations", headers });
+  assert.equal(invitations.statusCode, 200);
+  assert.equal(JSON.parse(invitations.body).invitations.length, 1);
+  assert.ok(sqlCalls.some(call => call.sql.includes("expire_relationship_invitations")));
+
+  const decision = await app.inject({
+    method: "POST", url: "/v1/relationship-invitations/" + invitationId + "/decision",
+    headers: { ...headers, "idempotency-key": "93000000-0000-0000-0000-000000000099" },
+    payload: { decision: "accepted" }
+  });
+  assert.equal(decision.statusCode, 200);
+  assert.equal(JSON.parse(decision.body).status, "accepted");
+
+  const relationships = await app.inject({ method: "GET", url: "/v1/relationships", headers });
+  assert.equal(relationships.statusCode, 200);
+  const listed = JSON.parse(relationships.body).relationships[0];
+  assert.equal(listed.relationshipId, relationshipId);
+  assert.equal(listed.otherParty.role, "merchant");
+  await app.close();
+});
+
+test("relationship creation rejects incompatible business roles before database mutation", async () => {
+  const pool = makePool(async (sql: string) => {
+    if (sql.includes("FROM identity.auth_sessions s")) return { rows: [{ user_id: userId, device_id: deviceId }] };
+    return { rows: [] };
+  });
+  const app = buildIdentityApi({
+    pool, otpDelivery: { sendCode: async () => undefined }, otpPepper, accessTokenSecret: accessSecret,
+    now: () => 1_800_000_000_000
+  });
+  // Build a valid signed token through the OTP endpoint first.
+  const authPool = makePool(async (sql: string) => {
+    if (sql.includes("consume_otp_challenge")) return { rows: [{ verified: true }] };
+    if (sql.includes("get_or_create_user_by_phone")) return { rows: [{ user_id: userId }] };
+    if (sql.includes("INSERT INTO identity.devices")) return { rows: [{ id: deviceId }] };
+    if (sql.includes("INSERT INTO identity.auth_sessions")) return { rows: [] };
+    if (sql.includes("FROM identity.auth_sessions s")) return { rows: [{ user_id: userId, device_id: deviceId }] };
+    return { rows: [] };
+  });
+  const authApp = buildIdentityApi({
+    pool: authPool, otpDelivery: { sendCode: async () => undefined }, otpPepper, accessTokenSecret: accessSecret,
+    now: () => 1_800_000_000_000
+  });
+  const login = await authApp.inject({
+    method: "POST", url: "/v1/auth/otp/verify",
+    payload: { phoneE164: phone, code: "123456", deviceId, deviceLabel: "Test", platform: "android" }
+  });
+  const token = (JSON.parse(login.body) as { accessToken: string }).accessToken;
+  const response = await app.inject({
+    method: "POST", url: "/v1/relationships",
+    headers: { authorization: "Bearer " + token, "idempotency-key": "91000000-0000-0000-0000-000000000098" },
+    payload: { inviteePhoneE164: "+967770000001", relationshipType: "merchant_customer", myRole: "supplier" }
+  });
+  assert.equal(response.statusCode, 422);
+  assert.equal(JSON.stringify(response.body).includes("ledger.create_relationship_invitation"), false);
+  await app.close();
+  await authApp.close();
+});
