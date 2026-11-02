@@ -76,3 +76,30 @@ The full EXPLAIN ANALYZE output is retained in the linked workflow logs.
 - Derive capacity targets after confirming DAU, transactions per user, peak sync bursts, and attachment volumes.
 
 No production database or paid infrastructure was used.
+
+
+## Financial lifecycle profiling — PR #14, Run #19
+
+**Workflow:** https://github.com/overurdream-collab/test4/actions/runs/41365278492  
+**Result:** Success. PostgreSQL 16.15, disposable GitHub-hosted CI database, same 1,000-relationship / 1M-operation / 1M-event seed.
+
+The profiling runner completed both 10-second phases with zero lifecycle errors:
+
+| Workers | Completed lifecycles | Throughput/s | Full lifecycle p50 | p95 | p99 |
+|---:|---:|---:|---:|---:|---:|
+| 10 | 1,051 | 104.01 | 93.66 ms | 124.73 ms | 169.77 ms |
+| 50 | 841 | 80.01 | 608.87 ms | 817.83 ms | 1,005.62 ms |
+
+The profiler adds sampling and measures a longer end-to-end path than the five-second benchmark, so do not compare these figures as if they were the same instrument. They independently confirm saturation at 50 workers.
+
+At 50 workers, the slowest measured approval/posting stage was allocation approval/posting (p50 253.81 ms, p95 362.47 ms); credit-charge and payment approval/posting p95 were 227.02 ms and 218.91 ms. The profiler sampled CPU/running most often, with additional WALWrite/WALSync, Lock/extend, LockManager, WALInsert, and buffer waits. It recorded no deadlocks. These are sampled observations, not a complete wait-time attribution.
+
+At 10 workers, allocation approval/posting p95 was 52.30 ms; at 50 it rose to 362.47 ms. The allocation path performs aggregate sums over allocations. The existing indexes are composite and begin with `relationship_id`, while the two aggregate predicates in `allocate_payment` and `assert_allocation_within_bounds` previously filtered only by payment_id or obligation_id. This prevented the intended leading index key from being used and could force broad scans as the table grows.
+
+### Optimization added after Run #19
+
+Migration `006_scope_allocation_aggregates.sql` adds `relationship_id` to both payment- and obligation-allocation aggregate predicates in both functions, matching the existing composite indexes:
+- `allocations_by_payment_idx (relationship_id, payment_id)`
+- `allocations_by_obligation_idx (relationship_id, obligation_id)`
+
+This is a targeted query/index alignment fix. It has **not yet been validated by a post-change CI run** at the time of this document update. Re-run the PostgreSQL invariant suite and million-event + lifecycle profile before claiming performance improvement.
