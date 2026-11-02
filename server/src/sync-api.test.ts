@@ -92,7 +92,6 @@ test("event cursor returns only the authorized relationship's ordered events", a
     pool: makePool(async () => ({
       rows: [{
         authorized: true,
-        authorized: true,
         sync_shard: 0,
         floor_sequence: 0,
         server_sequence: 3,
