@@ -373,6 +373,7 @@ export function buildApprovalApi({
               currency: string;
               receivableMinor: string;
               payableMinor: string;
+              partyBalanceMinor: string;
               unappliedPaymentAssetMinor: string;
               unappliedPaymentLiabilityMinor: string;
             }>;
@@ -391,6 +392,7 @@ export function buildApprovalApi({
               " 'currency', b.currency," +
               " 'receivableMinor', b.receivable_minor::text," +
               " 'payableMinor', b.payable_minor::text," +
+              " 'partyBalanceMinor', (b.receivable_minor - b.payable_minor)::text," +
               " 'unappliedPaymentAssetMinor', b.unapplied_payment_asset_minor::text," +
               " 'unappliedPaymentLiabilityMinor', b.unapplied_payment_liability_minor::text" +
             " ) ORDER BY b.owner_user_id, b.currency)" +
