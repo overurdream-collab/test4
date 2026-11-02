@@ -628,15 +628,31 @@ test("counterparty approval maps a return-overrun race to HTTP 409", async () =>
   await app.close();
 });
 
-test("rejects client-supplied actor identity in sales-return body", async () => {
+test("ignores client-supplied actor identity and binds only the authenticated principal", async () => {
+  let acceptedValues: unknown[] = [];
+  let calls = 0;
   const app = buildApprovalApi({
-    pool: makePool(async () => { throw new Error("schema must reject before query"); }),
+    pool: makePool(async (_sql, values) => {
+      calls++;
+      if (calls === 1) return { rows: [{
+        authorized: true, obligation_id: obligationId, amount_minor: "10000", returned_minor: "0",
+        cycle_status: "active", source_cycle_id: cycleId, current_cycle_id: cycleId
+      }] };
+      acceptedValues = values;
+      return { rows: [{
+        outcome: "accepted", canonical_operation_id: returnKey, business_state: "awaiting_counterparty",
+        server_version: 1, server_sequence: 45
+      }] };
+    }),
     resolvePrincipal: async () => ({ userId, deviceId })
   });
   const response = await app.inject({
     method: "POST", url: returnUrl, headers: { "idempotency-key": returnKey },
     payload: { ...returnPayload, actorUserId: "forged-user" }
   });
-  assert.equal(response.statusCode, 400);
+  assert.equal(response.statusCode, 201);
+  assert.equal(acceptedValues[2], userId);
+  assert.notEqual(acceptedValues[2], "forged-user");
+  assert.equal(acceptedValues[3], deviceId);
   await app.close();
 });
