@@ -78,3 +78,12 @@
 ### الاستنتاج المنضبط
 
 **السبب الأرجح المدعوم حاليًا هو ضغط WAL (WALWrite/WALInsert) مع زيادة CPU/running تحت التزامن، وليس أقفال حسابات الأطراف أو relationship counter المثبتة كسبب وحيد.** الثقة متوسطة إلى منخفضة لأن كل مستوى قيس في profile قصير واحد على runner مشترك، وعدادات العينات ليست مدد انتظار. لا نعلن سعة 50 عاملًا. يلزم تكرار 60–300 ثانية على ظروف ثابتة، وقياس hot-relationship skew، وpg_stat_statements حسب queryid، وفصل زمن journal triggers/SQL قبل قرار تحسين بنيوي.
+
+
+## تكرار القياس — Run #40
+
+- Run #40 (41473219237) نجح مع `pg_stat_statements` متاح.
+- 10 عمال: throughput 106.07 lifecycle/s، p95 131.81ms، WAL 23,560,681 bytes، CPU/running samples 94، WALWrite 61.
+- 50 عاملًا: throughput 102.47 lifecycle/s، p95 638.66ms، WAL 21,538,038 bytes، CPU/running samples 703، WALWrite 147، WALInsert 8.
+- p95 تضاعف قرابة 4.85×، وCPU/running ارتفع 7.5× تقريبًا. حجم WAL لم يرتفع في هذا التشغيل، خلافًا لـRun #39؛ لذلك لا يمكن وصف WAL volume بأنه السبب الجذري الوحيد.
+- الاستنتاج المصحح: symptom متكرر من تضخم p95 عند 50 عاملًا، مع ضغط CPU/تزامن وWAL synchronization waits. لا توجد أدلة كافية لعزل أقفال الحسابات أو counters أو تكلفة triggers. التباين بين runner baselines واضح؛ نحتاج تشغيلات أطول على runner ثابتة مع CPU utilization وqueryid attribution وlock-wait durations قبل قرار بنيوي.
