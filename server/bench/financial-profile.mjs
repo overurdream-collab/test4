@@ -135,9 +135,13 @@ async function profilePhase(concurrency, durationMs) {
   const waitSamples = Object.create(null);
   const lockSamples = Object.create(null);
   const activitySamples = [];
+  const waitingLockSamples = Object.create(null);
   const walSamples = [];
   const statementSamples = [];
   let lastStatementSampleAt = 0;
+  try { await monitorPool.query("SELECT pg_stat_statements_reset()"); } catch (error) {
+    process.stderr.write("pg_stat_statements reset unavailable: " + String(error) + "\n");
+  }
   const before = await snapshot();
   let stopMonitor = false;
 
@@ -172,6 +176,8 @@ async function profilePhase(concurrency, durationMs) {
         for (const row of locks.rows) {
           const key = [row.locktype, row.mode, row.granted].join("|");
           lockSamples[key] = (lockSamples[key] ?? 0) + row.lock_count;
+          if (!row.granted) waitingLockSamples[[row.locktype, row.mode].join("|")] =
+            (waitingLockSamples[[row.locktype, row.mode].join("|")] ?? 0) + row.lock_count;
         }
         const sampledAt = new Date().toISOString();
         activitySamples.push({ sampledAt, groups: activity.rows });
@@ -181,7 +187,7 @@ async function profilePhase(concurrency, durationMs) {
             statementSamples.push({ sampledAt, rows: await readTopStatements() });
             lastStatementSampleAt = Date.now();
           } catch (error) {
-            process.stderr.write("pg_stat_statements sample failed: " + String(error) + "\\n");
+            process.stderr.write("pg_stat_statements sample failed: " + String(error) + "\n");
           }
         }
       } catch (error) {
@@ -272,6 +278,7 @@ async function profilePhase(concurrency, durationMs) {
     stageLatencyMs: stageReport,
     sampledWaitEvents: waitSamples,
     sampledLocks: lockSamples,
+    sampledWaitingLocks: waitingLockSamples,
     sampledActivity: activitySamples,
     sampledWal: walSamples,
     sampledPgStatStatements: statementSamples,
