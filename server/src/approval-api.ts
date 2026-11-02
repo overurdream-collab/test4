@@ -206,5 +206,137 @@ export function buildApprovalApi({
     }
   );
 
+
+  app.get<{ Params: { relationshipId: string } }>(
+    "/v1/relationships/:relationshipId/settlement-reset-requests/pending",
+    {
+      schema: {
+        params: {
+          type: "object",
+          required: ["relationshipId"],
+          properties: { relationshipId: { type: "string", format: "uuid" } }
+        }
+      }
+    },
+    async (request, reply) => {
+      const principal = request.principal;
+      if (!principal) return reply.code(401).send({ error: "unauthorized" });
+      try {
+        const result = await pool.query<{
+          authorized: boolean;
+          request_id: string | null;
+          requested_by_user_id: string | null;
+          requested_at: Date | string | null;
+        }>(
+          "WITH auth AS (" +
+            " SELECT EXISTS (SELECT 1 FROM ledger.relationship_members" +
+            " WHERE relationship_id=$1::uuid AND user_id=$2::uuid AND status='active') AS authorized" +
+          ") SELECT auth.authorized, sr.id AS request_id, sr.requested_by_user_id, sr.requested_at" +
+          " FROM auth LEFT JOIN LATERAL (" +
+            " SELECT sr.id, sr.requested_by_user_id, sr.requested_at" +
+            " FROM ledger.settlement_requests sr" +
+            " LEFT JOIN ledger.settlement_decisions sd ON sd.request_id=sr.id" +
+            " WHERE sr.relationship_id=$1::uuid AND sd.request_id IS NULL" +
+            " ORDER BY sr.requested_at DESC LIMIT 1" +
+          ") sr ON auth.authorized",
+          [request.params.relationshipId, principal.userId]
+        );
+        const row = result.rows[0];
+        if (!row?.authorized) return reply.code(403).send({ error: "forbidden" });
+        return reply.code(200).send({
+          request: row.request_id ? {
+            requestId: row.request_id,
+            requestedByUserId: row.requested_by_user_id,
+            requestedAt: row.requested_at
+          } : null
+        });
+      } catch (error) {
+        request.log.error({ err: error }, "Pending settlement request lookup failed");
+        return reply.code(500).send({ error: "internal_error" });
+      }
+    }
+  );
+
+  app.post<{
+    Params: { relationshipId: string; requestId: string };
+    Body: { decision: "approved" | "rejected"; reason?: string };
+  }>(
+    "/v1/relationships/:relationshipId/settlement-reset-requests/:requestId/decision",
+    {
+      schema: {
+        params: {
+          type: "object",
+          required: ["relationshipId", "requestId"],
+          properties: {
+            relationshipId: { type: "string", format: "uuid" },
+            requestId: { type: "string", format: "uuid" }
+          }
+        },
+        headers: {
+          type: "object",
+          required: ["idempotency-key"],
+          properties: { "idempotency-key": { type: "string", format: "uuid" } }
+        },
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["decision"],
+          properties: {
+            decision: { type: "string", enum: ["approved", "rejected"] },
+            reason: { type: "string", maxLength: 1000 }
+          }
+        }
+      }
+    },
+    async (request, reply) => {
+      const idempotencyKey = request.headers["idempotency-key"];
+      if (typeof idempotencyKey !== "string" || !UUID.test(idempotencyKey)) {
+        return reply.code(400).send({ error: "invalid_idempotency_key" });
+      }
+      const principal = request.principal;
+      if (!principal) return reply.code(401).send({ error: "unauthorized" });
+      try {
+        const result = await pool.query<{ decision: string }>(
+          "SELECT ledger.decide_settlement_reset($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::text,$6::text) AS decision",
+          [
+            idempotencyKey,
+            request.params.relationshipId,
+            request.params.requestId,
+            principal.userId,
+            request.body.decision,
+            request.body.reason ?? null
+          ]
+        );
+        const decision = result.rows[0]?.decision;
+        if (decision !== request.body.decision) {
+          request.log.error("Settlement decision function returned an unexpected decision");
+          return reply.code(500).send({ error: "internal_error" });
+        }
+        return reply.code(200).send({
+          status: "decided",
+          requestId: request.params.requestId,
+          decision,
+          relationshipStatus: decision === "approved" ? "closed" : "active"
+        });
+      } catch (error) {
+        const code =
+          typeof error === "object" && error !== null && "code" in error
+            ? String((error as { code: unknown }).code)
+            : undefined;
+        if (code === "23514") {
+          return reply.code(409).send({ error: "settlement_not_complete" });
+        }
+        const status = statusForDatabaseError(code);
+        if (status === 500) {
+          request.log.error({ err: error }, "Settlement reset decision failed");
+          return reply.code(500).send({ error: "internal_error" });
+        }
+        const errorCode = status === 403 ? "forbidden" : status === 404 ? "not_found" :
+          status === 409 ? "conflict" : "validation_error";
+        return reply.code(status).send({ error: errorCode });
+      }
+    }
+  );
+
   return app;
 }
