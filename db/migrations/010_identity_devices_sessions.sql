@@ -89,10 +89,30 @@ CREATE INDEX identity_otp_ip_window_idx
 -- concurrent requests from bypassing the rolling-window rate limits.
 CREATE OR REPLACE FUNCTION identity.create_otp_challenge(
   p_phone_e164 text,p_code_hash bytea,p_ip_hash bytea,p_expires_at timestamptz
-) RETURNS uuid LANGUAGE plpgsql AS $
+) RETURNS uuid LANGUAGE plpgsql AS $otp$
 DECLARE phone_requests bigint; ip_requests bigint; challenge_id uuid;
 BEGIN
-  IF p_phone_e164 IS NULL OR p_phone_e164 !~ '^\+[1-9][0-9]{7,14}
+  IF p_phone_e164 IS NULL OR p_phone_e164 !~ '^\+[1-9][0-9]{7,14}$'
+     OR p_code_hash IS NULL OR octet_length(p_code_hash)<>32
+     OR p_ip_hash IS NULL OR octet_length(p_ip_hash)<>32
+     OR p_expires_at<=clock_timestamp()
+     OR p_expires_at>clock_timestamp()+interval '6 minutes' THEN
+    RAISE EXCEPTION 'Invalid OTP challenge request' USING ERRCODE='22023';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtextextended('otp-phone:'||p_phone_e164,0));
+  PERFORM pg_advisory_xact_lock(hashtextextended('otp-ip:'||encode(p_ip_hash,'hex'),0));
+  SELECT count(*) INTO phone_requests FROM identity.otp_challenges
+  WHERE phone_e164=p_phone_e164 AND created_at>clock_timestamp()-interval '15 minutes';
+  SELECT count(*) INTO ip_requests FROM identity.otp_challenges
+  WHERE requested_ip_hash=p_ip_hash AND created_at>clock_timestamp()-interval '1 hour';
+  IF phone_requests>=3 OR ip_requests>=10 THEN RETURN NULL; END IF;
+  INSERT INTO identity.otp_challenges(phone_e164,code_hash,requested_ip_hash,status,created_at,expires_at)
+  VALUES(p_phone_e164,p_code_hash,p_ip_hash,'pending',clock_timestamp(),p_expires_at)
+  RETURNING id INTO challenge_id;
+  RETURN challenge_id;
+END;
+$otp$;
+
 CREATE OR REPLACE FUNCTION identity.get_or_create_user_by_phone(p_phone_e164 text)
 RETURNS uuid LANGUAGE plpgsql AS $$
 DECLARE target_user uuid; target_status text;
