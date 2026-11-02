@@ -14,6 +14,24 @@ VALUES
  ('16000000-0000-0000-0000-000000000002','26000000-0000-0000-0000-000000000003','seller','active',true),
  ('16000000-0000-0000-0000-000000000002','26000000-0000-0000-0000-000000000004','buyer','active',true);
 
+-- Record a completed pre-reset operation so the archived cycle remains auditable.
+SELECT * FROM ledger.accept_operation(
+ '36000000-0000-0000-0000-000000000011',
+ '16000000-0000-0000-0000-000000000001',
+ '26000000-0000-0000-0000-000000000001',
+ '76000000-0000-0000-0000-000000000011',
+ 'supply', decode(repeat('b0',32),'hex'),
+ '{"description":"completed activity before white-page reset"}'::jsonb,
+ 0,1,now()
+);
+SELECT ledger.decide_operation(
+ '66000000-0000-0000-0000-000000000011',
+ '16000000-0000-0000-0000-000000000001',
+ '36000000-0000-0000-0000-000000000011',
+ '26000000-0000-0000-0000-000000000002',
+ 1,'approved','confirmed before cycle reset'
+);
+
 -- Party A requests reset after the existing balance gate has passed.
 SELECT ledger.request_settlement_reset(
  '86000000-0000-0000-0000-000000000001',
@@ -84,7 +102,7 @@ BEGIN
   IF (SELECT status FROM ledger.relationships
       WHERE id='16000000-0000-0000-0000-000000000001') <> 'active'
      THEN
-    RAISE EXCEPTION 'Approved reset did not close relationship';
+    RAISE EXCEPTION 'Relationship must remain active after white-page reset';
   END IF;
 
   -- A delayed retry of the original request remains idempotent after closure.
@@ -137,6 +155,14 @@ BEGIN
       WHERE relationship_id='16000000-0000-0000-0000-000000000001'
         AND status='archived') <> 1 THEN
     RAISE EXCEPTION 'Previous account cycle was not archived';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM ledger.operations
+    WHERE operation_id='36000000-0000-0000-0000-000000000011'
+      AND cycle_id=(SELECT cycle_id FROM ledger.settlement_requests
+                    WHERE id='86000000-0000-0000-0000-000000000001')
+  ) THEN
+    RAISE EXCEPTION 'Archived cycle history was not retained';
   END IF;
 END;
 $$;
@@ -199,5 +225,3 @@ SELECT * FROM ledger.accept_operation(
 
 ROLLBACK;
 SELECT 'bilateral settlement reset decision tests passed' AS result;
-
--- White-page test update in progress.
