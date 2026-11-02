@@ -4,17 +4,12 @@ CREATE TABLE ledger.settlement_requests (
   id uuid PRIMARY KEY,
   relationship_id uuid NOT NULL REFERENCES ledger.relationships(id),
   requested_by_user_id uuid NOT NULL,
-  status text NOT NULL DEFAULT 'awaiting_counterparty'
-    CHECK (status IN ('awaiting_counterparty', 'approved', 'rejected')),
+  status text NOT NULL DEFAULT 'requested' CHECK (status = 'requested'),
   requested_at timestamptz NOT NULL DEFAULT now(),
   FOREIGN KEY (relationship_id, requested_by_user_id)
     REFERENCES ledger.relationship_members (relationship_id, user_id),
   UNIQUE (id, relationship_id)
 );
-
-CREATE UNIQUE INDEX one_open_settlement_request_per_relationship
-  ON ledger.settlement_requests (relationship_id)
-  WHERE status = 'awaiting_counterparty';
 
 CREATE OR REPLACE FUNCTION ledger.request_settlement_reset(
   p_request_id uuid,
