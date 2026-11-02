@@ -7,7 +7,8 @@ const pool = new Pool({
   max: 60,
   idleTimeoutMillis: 10_000,
   connectionTimeoutMillis: 10_000,
-  application_name: "ledger-financial-profile"
+  application_name: "ledger-financial-profile",
+  options: "-c pg_stat_statements.track=all"
 });
 const monitorPool = new Pool({
   connectionString: process.env.DATABASE_URL,
