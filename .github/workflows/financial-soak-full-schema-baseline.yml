@@ -1,0 +1,102 @@
+name: Financial soak full-schema baseline (pre shared-lock optimization)
+
+on:
+  pull_request:
+    paths:
+      - "server/bench/financial-soak.mjs"
+      - ".github/workflows/financial-soak-full-schema-baseline.yml"
+      - "db/benchmarks/*.sql"
+      - "db/migrations/*.sql"
+
+permissions:
+  contents: read
+
+jobs:
+  baseline:
+    name: "baseline-hot-${{ matrix.duration }}s-repeat-${{ matrix.repeat }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        duration: [60, 300]
+        repeat: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install PostgreSQL client and record runner resources
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+          echo "CPU_COUNT=$(nproc)" | tee runner-resources.txt
+          free -h | tee -a runner-resources.txt
+          cat /proc/cpuinfo | grep -m1 'model name' | tee -a runner-resources.txt
+      - name: Start isolated PostgreSQL 16 with statement instrumentation
+        run: |
+          docker run -d --name ledger-baseline-postgres \
+            -e POSTGRES_USER=ledger_test \
+            -e POSTGRES_PASSWORD=ledger_test \
+            -e POSTGRES_DB=ledger_test \
+            -p 5432:5432 postgres:16 \
+            -c shared_preload_libraries=pg_stat_statements \
+            -c track_io_timing=on
+          for attempt in $(seq 1 30); do
+            if pg_isready -h localhost -U ledger_test -d ledger_test; then exit 0; fi
+            sleep 2
+          done
+          docker logs ledger-baseline-postgres
+          exit 1
+      - name: Enable pg_stat_statements
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS pg_stat_statements"
+      - name: Install benchmark dependencies
+        working-directory: server
+        run: npm install --no-package-lock --no-audit --no-fund
+      - name: Apply full schema without migration 013
+        env:
+          PGPASSWORD: ledger_test
+        run: |
+          for migration in db/migrations/001_core_ledger.sql db/migrations/002_obligations_payments_approvals.sql db/migrations/003_approval_idempotency_reason.sql db/migrations/004_offline_sync_inbox_events.sql db/migrations/005_settlement_reset_gate.sql db/migrations/006_scope_allocation_aggregates.sql db/migrations/007_settlement_reset_decisions.sql db/migrations/008_white_page_account_cycles.sql db/migrations/009_sales_returns_credit_balances.sql db/migrations/010_identity_devices_sessions.sql db/migrations/011_relationship_invitations.sql db/migrations/012_relationship_sequence_contention.sql; do
+            psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f "$migration"
+          done
+      - name: Load identical deterministic synthetic seed
+        env:
+          PGPASSWORD: ledger_test
+        run: |
+          echo "SOAK_SEED=mcias-ledger-soak-2026-11-02-v1"
+          psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/benchmarks/001_seed_one_million_events.sql
+      - name: Run hot-relationship baseline soak
+        working-directory: server
+        env:
+          DATABASE_URL: postgres://ledger_test:ledger_test@localhost:5432/ledger_test
+          SOAK_SEED: mcias-ledger-soak-2026-11-02-v1
+          SOAK_DURATION_SECONDS: "${{ matrix.duration }}"
+          SOAK_WORKERS: "50"
+          SOAK_SCENARIO: "hot"
+          SOAK_REPEAT: "${{ matrix.repeat }}"
+        run: |
+          set -o pipefail
+          node bench/financial-soak.mjs | tee financial-soak-summary.log
+      - name: Capture final PostgreSQL health
+        if: always()
+        env:
+          PGPASSWORD: ledger_test
+        run: |
+          psql -h localhost -U ledger_test -d ledger_test -Atc "SELECT datname, deadlocks, xact_commit, blks_hit, blks_read FROM pg_stat_database WHERE datname=current_database()" > postgres-final-health.txt || true
+          docker logs ledger-baseline-postgres > postgres-container.log 2>&1 || true
+      - name: Upload complete baseline evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-hot-${{ matrix.duration }}s-repeat-${{ matrix.repeat }}
+          path: |
+            server/financial-soak-result.json
+            server/financial-soak-summary.log
+            runner-resources.txt
+            postgres-final-health.txt
+            postgres-container.log
+          retention-days: 30
