@@ -79,7 +79,40 @@ SELECT ledger.decide_operation(
  1,'approved','payment allocated'
 );
 
-DO $$
+SELECT * FROM ledger.accept_operation(
+ '35000000-0000-0000-0000-000000000004',
+ '15000000-0000-0000-0000-000000000001',
+ '25000000-0000-0000-0000-000000000001',
+ '75000000-0000-0000-0000-000000000004',
+ 'supply', decode(repeat('a4',32),'hex'),
+ '{"description":"Pending supply operation"}'::jsonb,
+ 0,1,now()
+);
+
+DO $
+BEGIN
+  BEGIN
+    PERFORM ledger.request_settlement_reset(
+      '85000000-0000-0000-0000-000000000003',
+      '15000000-0000-0000-0000-000000000001',
+      '25000000-0000-0000-0000-000000000002'
+    );
+    RAISE EXCEPTION 'Reset request with pending operation unexpectedly succeeded';
+  EXCEPTION WHEN check_violation THEN
+    IF SQLERRM NOT LIKE 'Cannot request settlement reset:%' THEN RAISE; END IF;
+  END;
+END;
+$;
+
+SELECT ledger.decide_operation(
+ '65000000-0000-0000-0000-000000000004',
+ '15000000-0000-0000-0000-000000000001',
+ '35000000-0000-0000-0000-000000000004',
+ '25000000-0000-0000-0000-000000000002',
+ 1,'approved','supply confirmed'
+);
+
+DO $
 DECLARE req uuid;
 BEGIN
   req := ledger.request_settlement_reset(
@@ -89,6 +122,13 @@ BEGIN
   );
   IF req <> '85000000-0000-0000-0000-000000000002' THEN
     RAISE EXCEPTION 'Settlement request id mismatch';
+  END IF;
+  IF ledger.request_settlement_reset(
+       '85000000-0000-0000-0000-000000000002',
+       '15000000-0000-0000-0000-000000000001',
+       '25000000-0000-0000-0000-000000000002'
+     ) <> req THEN
+    RAISE EXCEPTION 'Settlement request retry was not idempotent';
   END IF;
   IF (SELECT count(*) FROM ledger.settlement_requests
       WHERE relationship_id='15000000-0000-0000-0000-000000000001'
