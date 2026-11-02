@@ -68,3 +68,21 @@ jobs:
         env:
           PGPASSWORD: ledger_test
         run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/tests/004_offline_sync_inbox_events_test.sql
+
+      - name: Apply settlement reset gate migration
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/migrations/005_settlement_reset_gate.sql
+      - name: Run settlement reset gate tests
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/tests/005_settlement_reset_gate_test.sql
+
+      - name: Apply relationship-scoped allocation optimization
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/migrations/006_scope_allocation_aggregates.sql
+      - name: Re-run allocation and financial invariant tests
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/tests/002_obligations_payments_approvals_test.sql
