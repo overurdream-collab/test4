@@ -1,0 +1,218 @@
+# مخطط قاعدة البيانات ERD — الدفتر التجاري المشترك
+
+**الحالة:** مطابق لجداول migrations 001–008 على main، وليس مخططًا مستقبليًا.  
+**المراجعة:** 2026-11-02 | **قاعدة الاختبار:** PostgreSQL 16، CI Run #94.
+
+> معرفات المستخدمين خارجية في هذه النسخة؛ لا يوجد جدول users ضمن schema ledger. الرسم يعرض الجداول الفعلية فقط.
+
+## 1. مخطط ERD
+
+```mermaid
+erDiagram
+ RELATIONSHIPS ||--o{ RELATIONSHIP_MEMBERS : members
+ RELATIONSHIPS ||--o{ OPERATIONS : operations
+ RELATIONSHIP_MEMBERS ||--o{ OPERATIONS : actor
+ RELATIONSHIPS ||--o{ ACCOUNT_CYCLES : cycles
+ RELATIONSHIPS ||--o{ ACCOUNTS : accounts
+ RELATIONSHIP_MEMBERS ||--o{ ACCOUNTS : owner
+ ACCOUNT_CYCLES ||--o{ OPERATIONS : cycle
+ ACCOUNT_CYCLES ||--o{ JOURNAL_TRANSACTIONS : cycle
+ ACCOUNT_CYCLES ||--o{ SETTLEMENT_REQUESTS : cycle
+ RELATIONSHIPS o|--|| ACCOUNT_CYCLES : current_cycle
+ OPERATIONS ||--o| JOURNAL_TRANSACTIONS : source
+ JOURNAL_TRANSACTIONS ||--|{ JOURNAL_ENTRIES : entries
+ ACCOUNTS ||--o{ JOURNAL_ENTRIES : posting
+ RELATIONSHIPS ||--o{ APPROVALS : approvals_scope
+ OPERATIONS ||--o{ APPROVALS : decisions
+ RELATIONSHIP_MEMBERS ||--o{ APPROVALS : approver
+ OPERATIONS ||--o| OBLIGATIONS : creates
+ RELATIONSHIP_MEMBERS ||--o{ OBLIGATIONS : creditor
+ RELATIONSHIP_MEMBERS ||--o{ OBLIGATIONS : debtor
+ OPERATIONS ||--o| PAYMENTS : creates
+ RELATIONSHIP_MEMBERS ||--o{ PAYMENTS : payer
+ RELATIONSHIP_MEMBERS ||--o{ PAYMENTS : payee
+ PAYMENTS ||--o{ ALLOCATIONS : allocated
+ OBLIGATIONS ||--o{ ALLOCATIONS : settled
+ OPERATIONS ||--o| ALLOCATIONS : allocation_source
+ RELATIONSHIPS ||--|| RELATIONSHIP_SYNC_COUNTERS : counter
+ RELATIONSHIPS ||--o{ RELATIONSHIP_EVENTS : events
+ OPERATIONS o|--o{ RELATIONSHIP_EVENTS : event_subject
+ RELATIONSHIPS ||--o{ SETTLEMENT_REQUESTS : requests
+ RELATIONSHIP_MEMBERS ||--o{ SETTLEMENT_REQUESTS : requester
+ SETTLEMENT_REQUESTS ||--o| SETTLEMENT_DECISIONS : decision
+ RELATIONSHIP_MEMBERS ||--o{ SETTLEMENT_DECISIONS : decider
+
+ RELATIONSHIPS {
+  uuid id PK
+  text status
+  timestamptz created_at
+  uuid current_cycle_id FK
+ }
+ RELATIONSHIP_MEMBERS {
+  uuid relationship_id PK,FK
+  uuid user_id PK
+  text role_label
+  text status
+  boolean can_approve
+ }
+ OPERATIONS {
+  uuid operation_id PK
+  uuid relationship_id FK
+  uuid actor_user_id FK
+  text operation_type
+  bytea request_hash
+  text business_state
+  bigint base_version
+  bigint server_version
+  uuid cycle_id FK
+  timestamptz created_at
+ }
+ APPROVALS {
+  uuid id PK
+  uuid relationship_id FK
+  uuid operation_id FK
+  uuid actor_user_id FK
+  text decision
+  bigint expected_server_version
+  bigint resulting_server_version
+  text reason
+  timestamptz decided_at
+ }
+ OBLIGATIONS {
+  uuid id PK
+  uuid relationship_id FK
+  uuid source_operation_id FK
+  uuid creditor_user_id FK
+  uuid debtor_user_id FK
+  char currency
+  bigint amount_minor
+  text status
+ }
+ PAYMENTS {
+  uuid id PK
+  uuid relationship_id FK
+  uuid source_operation_id FK
+  uuid payer_user_id FK
+  uuid payee_user_id FK
+  char currency
+  bigint amount_minor
+  text status
+ }
+ ALLOCATIONS {
+  uuid id PK
+  uuid relationship_id FK
+  uuid payment_id FK
+  uuid obligation_id FK
+  uuid source_operation_id FK
+  char currency
+  bigint amount_minor
+ }
+ ACCOUNTS {
+  uuid id PK
+  uuid relationship_id FK
+  uuid owner_user_id FK
+  text account_type
+  char currency
+ }
+ JOURNAL_TRANSACTIONS {
+  uuid id PK
+  uuid relationship_id FK
+  uuid source_operation_id FK
+  char currency
+  text description
+  uuid cycle_id FK
+  timestamptz posted_at
+ }
+ JOURNAL_ENTRIES {
+  uuid id PK
+  uuid journal_transaction_id FK
+  uuid relationship_id FK
+  char currency
+  uuid account_id FK
+  bigint debit_minor
+  bigint credit_minor
+ }
+ RELATIONSHIP_SYNC_COUNTERS {
+  uuid relationship_id PK,FK
+  bigint last_sequence
+ }
+ RELATIONSHIP_EVENTS {
+  uuid relationship_id PK,FK
+  bigint server_sequence PK
+  uuid event_id UK
+  uuid operation_id FK
+  text event_type
+  jsonb event_payload
+  timestamptz created_at
+ }
+ SETTLEMENT_REQUESTS {
+  uuid id PK
+  uuid relationship_id FK
+  uuid requested_by_user_id FK
+  text status
+  uuid cycle_id FK
+  timestamptz requested_at
+ }
+ SETTLEMENT_DECISIONS {
+  uuid idempotency_key PK
+  uuid request_id FK,UK
+  uuid relationship_id FK
+  uuid actor_user_id FK
+  text decision
+  text reason
+  timestamptz decided_at
+ }
+ ACCOUNT_CYCLES {
+  uuid id PK
+  uuid relationship_id FK
+  bigint cycle_number
+  text title
+  text status
+  timestamptz started_at
+  timestamptz ended_at
+  uuid created_by_reset_request_id
+ }
+```
+
+## 2. مسؤولية الجداول
+
+| الجدول | المسؤولية |
+|---|---|
+| relationships | العلاقة التجارية ومؤشر الدورة الحالية |
+| relationship_members | عضوية العلاقة والدور وصلاحية الاعتماد |
+| operations | أوامر الأعمال وحالتها وإصداراتها ودورتها |
+| approvals | قرارات اعتماد/رفض العمليات |
+| obligations | أصل المستحق والدائن والمدين |
+| payments | الدفعات المسجلة |
+| allocations | تخصيص دفعة إلى التزام |
+| accounts | حسابات الأستاذ المساعدة لكل طرف/نوع/عملة |
+| journal_transactions | رأس القيد ومصدره |
+| journal_entries | الأسطر المدينة والدائنة |
+| relationship_sync_counters | عداد تسلسل أحداث العلاقة |
+| relationship_events | سجل أحداث المزامنة |
+| settlement_requests | طلب التصفير |
+| settlement_decisions | قرار الطرف المقابل |
+| account_cycles | صفحات الحساب الحالية والمؤرشفة |
+
+## 3. قيود لا يظهرها الرسم وحده
+
+- المفاتيح المركبة تربط السجلات بالعلاقة نفسها، وتمنع مراجع عابرة للعلاقات.
+- أسطر القيد مرتبطة برأس القيد والحساب وبالعملة والعلاقة ذاتها.
+- تخصيص الدفعة يخضع للتحقق من الأطراف والعملة والمبالغ المتبقية؛ migration 008 يمنع تخصيصًا بين دورتين.
+- العمليات والقيود وطلبات التصفير تحمل cycle_id. لكل علاقة دورة نشطة واحدة، وrelationships.current_cycle_id يشير إلى الحالية.
+- operation_id في relationship_events يقبل NULL لأحداث التصفير.
+- السجلات المالية وأحداث/قرارات محددة محمية من UPDATE/DELETE بواسطة triggers. سير عمل العكس والتصحيح الكامل ليس منفذًا بعد.
+
+## 4. ما ليس موجودًا كجداول في migrations 001–008
+
+لا توجد جداول ledger للمستخدمين/OTP، الأجهزة والجلسات، المرفقات، سياسات الموافقة المستقلة، سجل تدقيق أمني منفصل، أو outbox وsync cursor المحليين (هذه ضمن طبقة الهاتف). لا ترسم هذه كجداول منفذة قبل إضافة migrations.
+
+## 5. مصدر الحقيقة والاختبار
+
+- المصدر: migrations 001–008 داخل db/migrations.
+- الاختبارات: db/tests/001 إلى 005 و007.
+- Workflow: .github/workflows/ledger-db-tests.yml.
+- دليل PostgreSQL 16: [CI Run #94](https://github.com/overurdream-collab/test4/actions/runs/41424042840).
+- لا توجد قاعدة إنتاجية أو نشر ضمن هذا العمل.
+
+**تنبيه:** الرسم يوضح الكيانات وروابطها. ملفات SQL هي المرجع النهائي لأنواع القيود المركبة وCHECK والفهارس وtriggers.
