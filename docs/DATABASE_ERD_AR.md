@@ -1,7 +1,7 @@
 # مخطط قاعدة البيانات ERD — الدفتر التجاري المشترك
 
-**الحالة:** مطابق لجداول migrations 001–008 على main، وليس مخططًا مستقبليًا.  
-**المراجعة:** 2026-11-02 | **قاعدة الاختبار:** PostgreSQL 16، CI Run #94.
+**الحالة:** مخطط as-built لجداول migrations 001–009 على main؛ لا يخلط الجداول المنفذة بالكيانات المستقبلية.  
+**المراجعة:** 2026-11-02 | **قاعدة الاختبار:** PostgreSQL 16، CI Run #131.
 
 > معرفات المستخدمين خارجية في هذه النسخة؛ لا يوجد جدول users ضمن schema ledger. الرسم يعرض الجداول الفعلية فقط.
 
@@ -37,6 +37,9 @@ erDiagram
  RELATIONSHIPS ||--|| RELATIONSHIP_SYNC_COUNTERS : counter
  RELATIONSHIPS ||--o{ RELATIONSHIP_EVENTS : events
  OPERATIONS o|--o{ RELATIONSHIP_EVENTS : event_subject
+ RELATIONSHIPS ||--o{ SALES_RETURNS : returns
+ OPERATIONS ||--o| SALES_RETURNS : source
+ OBLIGATIONS ||--o{ SALES_RETURNS : original_obligation
  RELATIONSHIPS ||--o{ SETTLEMENT_REQUESTS : requests
  RELATIONSHIP_MEMBERS ||--o{ SETTLEMENT_REQUESTS : requester
  SETTLEMENT_REQUESTS ||--o| SETTLEMENT_DECISIONS : decision
@@ -145,6 +148,16 @@ erDiagram
   jsonb event_payload
   timestamptz created_at
  }
+ SALES_RETURNS {
+  uuid id PK
+  uuid relationship_id FK
+  uuid source_operation_id FK,UK
+  uuid original_obligation_id FK
+  char currency
+  bigint amount_minor
+  text reason
+  timestamptz created_at
+ }
  SETTLEMENT_REQUESTS {
   uuid id PK
   uuid relationship_id FK
@@ -193,6 +206,7 @@ erDiagram
 | settlement_requests | طلب التصفير |
 | settlement_decisions | قرار الطرف المقابل |
 | account_cycles | صفحات الحساب الحالية والمؤرشفة |
+| sales_returns | المرتجعات المعتمدة المرتبطة بالتزام أصلي؛ immutable ويُنشئ قيدًا عكسيًا |
 
 ## 3. قيود لا يظهرها الرسم وحده
 
@@ -201,18 +215,20 @@ erDiagram
 - تخصيص الدفعة يخضع للتحقق من الأطراف والعملة والمبالغ المتبقية؛ migration 008 يمنع تخصيصًا بين دورتين.
 - العمليات والقيود وطلبات التصفير تحمل cycle_id. لكل علاقة دورة نشطة واحدة، وrelationships.current_cycle_id يشير إلى الحالية.
 - operation_id في relationship_events يقبل NULL لأحداث التصفير.
-- السجلات المالية وأحداث/قرارات محددة محمية من UPDATE/DELETE بواسطة triggers. سير عمل العكس والتصحيح الكامل ليس منفذًا بعد.
+- السجلات المالية وأحداث/قرارات محددة محمية من UPDATE/DELETE بواسطة triggers. سجل المرتجعات sales_returns منفذ في migration 009 ومحصن من UPDATE/DELETE؛ لا يعني ذلك اكتمال واجهة مرتجع أو رد نقدي مستقل أو سير عمل عام لعكس كل أنواع الدفعات والتخصيصات.
 
-## 4. ما ليس موجودًا كجداول في migrations 001–008
+## 4. ما ليس موجودًا كجداول في migrations 001–009
 
 لا توجد جداول ledger للمستخدمين/OTP، الأجهزة والجلسات، المرفقات، سياسات الموافقة المستقلة، سجل تدقيق أمني منفصل، أو outbox وsync cursor المحليين (هذه ضمن طبقة الهاتف). لا ترسم هذه كجداول منفذة قبل إضافة migrations.
 
 ## 5. مصدر الحقيقة والاختبار
 
-- المصدر: migrations 001–008 داخل db/migrations.
+- المصدر: migrations 001–009 داخل db/migrations.
 - الاختبارات: db/tests/001 إلى 005 و007.
 - Workflow: .github/workflows/ledger-db-tests.yml.
 - دليل PostgreSQL 16: [CI Run #94](https://github.com/overurdream-collab/test4/actions/runs/41424042840).
 - لا توجد قاعدة إنتاجية أو نشر ضمن هذا العمل.
+
+**تحديث بعد PR #25–#28:** أضيفت sales_returns في migration 009، وأصبح API يعرض partyBalanceMinor بإشارة موجبة/سالبة لكل طرف. PostgreSQL Run #131 وApproval API Run #66 ناجحان. راجع ملف التسليم لأرقام SHA وروابط التشغيل.
 
 **تنبيه:** الرسم يوضح الكيانات وروابطها. ملفات SQL هي المرجع النهائي لأنواع القيود المركبة وCHECK والفهارس وtriggers.
