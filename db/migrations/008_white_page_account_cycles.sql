@@ -47,7 +47,7 @@ ALTER TABLE ledger.relationships
   ALTER COLUMN current_cycle_id DROP NOT NULL;
 
 CREATE OR REPLACE FUNCTION ledger.initialize_relationship_account_cycle()
-RETURNS trigger LANGUAGE plpgsql AS $
+RETURNS trigger LANGUAGE plpgsql AS $init$
 DECLARE initial_cycle_id uuid;
 BEGIN
   IF NEW.current_cycle_id IS NULL THEN
@@ -62,7 +62,7 @@ BEGIN
   END IF;
   RETURN NEW;
 END;
-$;
+$init$;
 
 CREATE TRIGGER relationships_initialize_account_cycle
 AFTER INSERT ON ledger.relationships
