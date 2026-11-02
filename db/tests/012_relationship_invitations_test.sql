@@ -74,27 +74,27 @@ BEGIN
   IF ledger.decide_relationship_invitation(expired_invitation,invitee_later,'93000000-0000-0000-0000-000000000005','accepted',NULL)<>'accepted' THEN
     RAISE EXCEPTION 'Newly registered invitee could not accept by verified phone';
   END IF;
-  -- Expired invitation is closed and not left as a usable suspended relationship.
+  -- A pending relationship cannot accept a financial operation before both parties join.
   expired_invitation:='91000000-0000-0000-0000-000000000005';
   expired_relationship:='92000000-0000-0000-0000-000000000005';
   PERFORM * FROM ledger.create_relationship_invitation(expired_invitation,expired_relationship,inviter,
     '+967771234585','merchant_customer','merchant','customer',decode(repeat('ee',32),'hex'),now()+interval '7 days');
-  UPDATE ledger.relationship_invitations SET expires_at=now()-interval '1 minute' WHERE id=expired_invitation;
+  BEGIN
+    PERFORM * FROM ledger.accept_operation(
+      '94000000-0000-0000-0000-000000000001',expired_relationship,inviter,
+      '95000000-0000-0000-0000-000000000001','credit_charge',decode(repeat('ff',32),'hex'),
+      '{"amountMinor":100,"currency":"YER"}'::jsonb,0,1,now());
+    RAISE EXCEPTION 'Financial operation accepted before second party joined';
+  EXCEPTION WHEN object_not_in_prerequisite_state THEN NULL;
+  END;
+  -- Expired invitation is closed and not left as a usable suspended relationship.
+  UPDATE ledger.relationship_invitations SET expires_at=created_at+interval '1 microsecond' WHERE id=expired_invitation;
   IF ledger.expire_relationship_invitations(identity.get_or_create_user_by_phone('+967771234585'))<>1 THEN
     RAISE EXCEPTION 'Expired invitation was not processed';
   END IF;
   IF (SELECT status FROM ledger.relationships WHERE id=expired_relationship)<>'closed' THEN
     RAISE EXCEPTION 'Expired invitation relationship was not closed';
   END IF;
-  -- A pending relationship cannot accept a financial operation before both parties join.
-  BEGIN
-    PERFORM * FROM ledger.accept_operation(
-      '94000000-0000-0000-0000-000000000001',rejected_relationship,inviter,
-      '95000000-0000-0000-0000-000000000001','credit_charge',decode(repeat('ff',32),'hex'),
-      '{"amountMinor":100,"currency":"YER"}'::jsonb,0,1,now());
-    RAISE EXCEPTION 'Financial operation accepted on closed/pending relationship';
-  EXCEPTION WHEN object_not_in_prerequisite_state THEN NULL;
-  END;
 END;
 $relationship_tests$;
 ROLLBACK;
