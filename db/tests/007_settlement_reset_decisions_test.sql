@@ -187,3 +187,5 @@ SELECT * FROM ledger.accept_operation(
 
 ROLLBACK;
 SELECT 'bilateral settlement reset decision tests passed' AS result;
+
+-- White-page test update in progress.
