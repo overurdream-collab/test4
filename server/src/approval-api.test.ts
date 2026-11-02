@@ -514,11 +514,16 @@ test("replays an already approved sales return before checking the remaining obl
 });
 
 test("rejects a sales return that exceeds the original obligation with HTTP 409", async () => {
+  let calls = 0;
   const app = buildApprovalApi({
-    pool: makePool(async () => ({ rows: [{
-      authorized: true, obligation_id: obligationId, amount_minor: "10000", returned_minor: "9000",
-      cycle_status: "active", source_cycle_id: cycleId, current_cycle_id: cycleId
-    }] })),
+    pool: makePool(async () => {
+      calls++;
+      if (calls === 1) return { rows: [] };
+      return { rows: [{
+        authorized: true, obligation_id: obligationId, amount_minor: "10000", returned_minor: "9000",
+        cycle_status: "active", source_cycle_id: cycleId, current_cycle_id: cycleId
+      }] };
+    }),
     resolvePrincipal: async () => ({ userId, deviceId })
   });
   const response = await app.inject({ method: "POST", url: returnUrl, headers: { "idempotency-key": returnKey }, payload: returnPayload });
@@ -528,11 +533,16 @@ test("rejects a sales return that exceeds the original obligation with HTTP 409"
 });
 
 test("rejects a sales return against an archived source cycle with HTTP 409", async () => {
+  let calls = 0;
   const app = buildApprovalApi({
-    pool: makePool(async () => ({ rows: [{
-      authorized: true, obligation_id: obligationId, amount_minor: "10000", returned_minor: "0",
-      cycle_status: "archived", source_cycle_id: cycleId, current_cycle_id: "83000000-0000-0000-0000-000000000002"
-    }] })),
+    pool: makePool(async () => {
+      calls++;
+      if (calls === 1) return { rows: [] };
+      return { rows: [{
+        authorized: true, obligation_id: obligationId, amount_minor: "10000", returned_minor: "0",
+        cycle_status: "archived", source_cycle_id: cycleId, current_cycle_id: "83000000-0000-0000-0000-000000000002"
+      }] };
+    }),
     resolvePrincipal: async () => ({ userId, deviceId })
   });
   const response = await app.inject({ method: "POST", url: returnUrl, headers: { "idempotency-key": returnKey }, payload: returnPayload });
@@ -636,7 +646,8 @@ test("ignores client-supplied actor identity and binds only the authenticated pr
   const app = buildApprovalApi({
     pool: makePool(async (_sql, values) => {
       calls++;
-      if (calls === 1) return { rows: [{
+      if (calls === 1) return { rows: [] };
+      if (calls === 2) return { rows: [{
         authorized: true, obligation_id: obligationId, amount_minor: "10000", returned_minor: "0",
         cycle_status: "active", source_cycle_id: cycleId, current_cycle_id: cycleId
       }] };
