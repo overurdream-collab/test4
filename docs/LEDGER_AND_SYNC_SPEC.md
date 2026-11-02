@@ -1,6 +1,6 @@
 # Ledger and Offline Synchronization Specification
 
-**Status:** Engineering proposal for validation; not an implemented schema or production contract.
+**Status:** Conceptual target proposal; not the as-built SQL schema. For the exact PostgreSQL ERD and implementation-aligned financial rules, use `docs/DATABASE_ERD_AR.md` and `docs/LEDGER_FINANCIAL_SPEC_AR.md`. Do not treat proposed entities in this document as implemented tables.
 **Date:** 2026-11-02
 **Branch:** `design/ledger-and-sync-spec`
 **Depends on:** `docs/PROJECT_FOUNDATION.md`
@@ -310,7 +310,7 @@ These are recommendations to validate, not silently finalized product policy:
 6. Preserve all local queued operations across app restarts and never change operation IDs on retry.
 7. Do not implement subscription expiry, automatic exchange rates, or multi-party allocation in the first prototype.
 
-## 15. Worklog
+## 15. Relationship to the implemented schema\n\nThe conceptual schema in Section 10 is a target model, not a list of tables already deployed. The as-built database is defined by migrations 001–008. Its exact entity relationships are documented in `docs/DATABASE_ERD_AR.md`; implemented posting behavior and explicit gaps are documented in `docs/LEDGER_FINANCIAL_SPEC_AR.md`. In particular, user/device/attachment/audit/idempotency-record entities in the conceptual proposal must not be mistaken for PostgreSQL tables in the current ledger schema.\n\n## 16. Worklog
 
 ### 2026-11-02 — Ledger and sync specification
 - Created this engineering proposal on `design/ledger-and-sync-spec`.
