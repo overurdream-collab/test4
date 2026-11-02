@@ -336,8 +336,9 @@ test("returns current and archived cycles with explicit debit-minus-credit balan
           ownerUserId: userId,
           currency: "YER",
           receivableMinor: "12500",
-                payableMinor: "0",
-                unappliedPaymentAssetMinor: "0",
+          payableMinor: "0",
+          partyBalanceMinor: "12500",
+          unappliedPaymentAssetMinor: "0",
                 unappliedPaymentLiabilityMinor: "0"
         }]
       }
@@ -378,8 +379,8 @@ test("account-cycle balance contract keeps receivables, payables and unapplied p
   const body = JSON.parse(response.body);
   assert.equal(body.balanceSemantics, "separate_account_classes_minor_units");
   assert.deepEqual(body.cycles[0].balances, [
-    { ownerUserId: userId, currency: "YER", receivableMinor: "12000", payableMinor: "0", unappliedPaymentAssetMinor: "3000", unappliedPaymentLiabilityMinor: "0" },
-    { ownerUserId: "21000000-0000-0000-0000-000000000003", currency: "YER", receivableMinor: "0", payableMinor: "12000", unappliedPaymentAssetMinor: "0", unappliedPaymentLiabilityMinor: "3000" }
+    { ownerUserId: userId, currency: "YER", receivableMinor: "12000", payableMinor: "0", partyBalanceMinor: "12000", unappliedPaymentAssetMinor: "3000", unappliedPaymentLiabilityMinor: "0" },
+    { ownerUserId: "21000000-0000-0000-0000-000000000003", currency: "YER", receivableMinor: "0", payableMinor: "12000", partyBalanceMinor: "-12000", unappliedPaymentAssetMinor: "0", unappliedPaymentLiabilityMinor: "3000" }
   ]);
   await app.close();
 });
