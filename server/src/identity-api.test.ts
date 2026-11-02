@@ -240,7 +240,8 @@ test("relationship creation rejects incompatible business roles before database 
     return { rows: [] };
   });
   const app = buildIdentityApi({
-    pool, otpDelivery: { sendCode: async () => undefined }, otpPepper, accessTokenSecret: accessSecret
+    pool, otpDelivery: { sendCode: async () => undefined }, otpPepper, accessTokenSecret: accessSecret,
+    now: () => 1_800_000_000_000
   });
   // Build a valid signed token through the OTP endpoint first.
   const authPool = makePool(async (sql: string) => {
