@@ -1,4 +1,5 @@
 import {
+  createHash,
   createHmac,
   randomInt,
   randomUUID,
@@ -364,6 +365,220 @@ export function buildIdentityApi({
       }
     }
   );
+
+
+  app.post<{
+    Body: {
+      inviteePhoneE164: string;
+      relationshipType: "merchant_customer" | "supplier_buyer";
+      myRole: "merchant" | "customer" | "supplier" | "buyer";
+    };
+  }>(
+    "/v1/relationships",
+    {
+      schema: {
+        headers: {
+          type: "object", required: ["idempotency-key"],
+          properties: { "idempotency-key": { type: "string", format: "uuid" } }
+        },
+        body: {
+          type: "object", additionalProperties: false,
+          required: ["inviteePhoneE164","relationshipType","myRole"],
+          properties: {
+            inviteePhoneE164: { type: "string", pattern: "^\\+[1-9][0-9]{7,14}$" },
+            relationshipType: { type: "string", enum: ["merchant_customer","supplier_buyer"] },
+            myRole: { type: "string", enum: ["merchant","customer","supplier","buyer"] }
+          }
+        }
+      }
+    },
+    async (request, reply) => {
+      const principal = request.identityPrincipal;
+      if (!principal) return reply.code(401).send({ error: "unauthorized" });
+      const idempotencyKey = request.headers["idempotency-key"];
+      if (typeof idempotencyKey !== "string" || !UUID.test(idempotencyKey)) {
+        return reply.code(400).send({ error: "invalid_idempotency_key" });
+      }
+      const rolePairs = {
+        merchant_customer: { merchant: "customer", customer: "merchant" },
+        supplier_buyer: { supplier: "buyer", buyer: "supplier" }
+      } as const;
+      const inviteeRole = rolePairs[request.body.relationshipType][
+        request.body.myRole as keyof typeof rolePairs[typeof request.body.relationshipType]
+      ];
+      if (!inviteeRole) return reply.code(422).send({ error: "invalid_role_pair" });
+      const canonicalRequest = JSON.stringify({
+        inviteePhoneE164: request.body.inviteePhoneE164,
+        relationshipType: request.body.relationshipType,
+        myRole: request.body.myRole,
+        inviteeRole
+      });
+      const requestHash = createHash("sha256").update(canonicalRequest, "utf8").digest();
+      const relationshipId = randomUUID();
+      const expiresAt = new Date(now() + 7 * 24 * 60 * 60 * 1000);
+      try {
+        const result = await pool.query<{
+          invitation_id: string; relationship_id: string; status: string;
+        }>(
+          "SELECT * FROM ledger.create_relationship_invitation(" +
+          "$1::uuid,$2::uuid,$3::uuid,$4,$5,$6,$7,$8,$9)",
+          [idempotencyKey, relationshipId, principal.userId, request.body.inviteePhoneE164,
+            request.body.relationshipType, request.body.myRole, inviteeRole, requestHash, expiresAt]
+        );
+        const row = result.rows[0];
+        if (!row) return reply.code(500).send({ error: "internal_error" });
+        return reply.code(201).send({
+          invitationId: row.invitation_id,
+          relationshipId: row.relationship_id,
+          status: row.status,
+          inviteePhoneE164: request.body.inviteePhoneE164,
+          expiresAt
+        });
+      } catch (error) {
+        const code = typeof error === "object" && error !== null && "code" in error
+          ? String((error as { code: unknown }).code) : undefined;
+        if (code === "42501") return reply.code(403).send({ error: "forbidden" });
+        if (code === "23505" || code === "55000") return reply.code(409).send({ error: "conflict" });
+        if (code === "23514" || code === "22023") return reply.code(422).send({ error: "validation_error" });
+        return reply.code(500).send({ error: "internal_error" });
+      }
+    }
+  );
+
+  app.get("/v1/relationship-invitations", async (request, reply) => {
+    const principal = request.identityPrincipal;
+    if (!principal) return reply.code(401).send({ error: "unauthorized" });
+    try {
+      await pool.query("SELECT ledger.expire_relationship_invitations($1::uuid)", [principal.userId]);
+      const result = await pool.query<{
+        invitation_id: string; relationship_id: string; relationship_type: string;
+        inviter_user_id: string; inviter_display_name: string | null;
+        inviter_phone_e164: string | null; inviter_role: string; invitee_role: string;
+        created_at: Date | string; expires_at: Date | string;
+      }>(
+        "SELECT ri.id AS invitation_id,ri.relationship_id,ri.relationship_type,ri.inviter_user_id," +
+        "up.display_name AS inviter_display_name,ip.phone_e164 AS inviter_phone_e164," +
+        "ri.inviter_role,ri.invitee_role,ri.created_at,ri.expires_at " +
+        "FROM ledger.relationship_invitations ri " +
+        "JOIN identity.phone_identities mine ON mine.user_id=$1::uuid AND mine.phone_e164=ri.invitee_phone_e164 " +
+        "LEFT JOIN identity.user_profiles up ON up.user_id=ri.inviter_user_id " +
+        "LEFT JOIN LATERAL (SELECT phone_e164 FROM identity.phone_identities " +
+        "WHERE user_id=ri.inviter_user_id ORDER BY verified_at DESC LIMIT 1) ip ON true " +
+        "WHERE ri.status='pending' AND ri.expires_at>now() " +
+        "AND (ri.invitee_user_id IS NULL OR ri.invitee_user_id=$1::uuid) " +
+        "ORDER BY ri.created_at DESC",
+        [principal.userId]
+      );
+      return reply.code(200).send({ invitations: result.rows.map(row => ({
+        invitationId: row.invitation_id,
+        relationshipId: row.relationship_id,
+        relationshipType: row.relationship_type,
+        inviter: {
+          userId: row.inviter_user_id,
+          displayName: row.inviter_display_name,
+          phoneE164: row.inviter_phone_e164,
+          role: row.inviter_role
+        },
+        myRole: row.invitee_role,
+        createdAt: row.created_at,
+        expiresAt: row.expires_at
+      })) });
+    } catch {
+      return reply.code(500).send({ error: "internal_error" });
+    }
+  });
+
+  app.post<{
+    Params: { invitationId: string };
+    Body: { decision: "accepted" | "rejected"; reason?: string };
+  }>(
+    "/v1/relationship-invitations/:invitationId/decision",
+    {
+      schema: {
+        params: {
+          type: "object", required: ["invitationId"],
+          properties: { invitationId: { type: "string", format: "uuid" } }
+        },
+        headers: {
+          type: "object", required: ["idempotency-key"],
+          properties: { "idempotency-key": { type: "string", format: "uuid" } }
+        },
+        body: {
+          type: "object", additionalProperties: false, required: ["decision"],
+          properties: {
+            decision: { type: "string", enum: ["accepted","rejected"] },
+            reason: { type: "string", maxLength: 1000 }
+          }
+        }
+      }
+    },
+    async (request, reply) => {
+      const principal = request.identityPrincipal;
+      if (!principal) return reply.code(401).send({ error: "unauthorized" });
+      const decisionId = request.headers["idempotency-key"];
+      if (typeof decisionId !== "string" || !UUID.test(decisionId) || !UUID.test(request.params.invitationId)) {
+        return reply.code(400).send({ error: "invalid_idempotency_key" });
+      }
+      try {
+        const result = await pool.query<{ status: string }>(
+          "SELECT ledger.decide_relationship_invitation($1::uuid,$2::uuid,$3::uuid,$4,$5) AS status",
+          [request.params.invitationId, principal.userId, decisionId, request.body.decision, request.body.reason ?? null]
+        );
+        const status = result.rows[0]?.status;
+        if (status === "expired") return reply.code(410).send({ status: "expired" });
+        if (status !== "accepted" && status !== "rejected") return reply.code(500).send({ error: "internal_error" });
+        return reply.code(200).send({ invitationId: request.params.invitationId, status });
+      } catch (error) {
+        const code = typeof error === "object" && error !== null && "code" in error
+          ? String((error as { code: unknown }).code) : undefined;
+        if (code === "42501") return reply.code(403).send({ error: "forbidden" });
+        if (code === "23503") return reply.code(404).send({ error: "not_found" });
+        if (code === "55000" || code === "23505") return reply.code(409).send({ error: "conflict" });
+        if (code === "23514" || code === "22023") return reply.code(422).send({ error: "validation_error" });
+        return reply.code(500).send({ error: "internal_error" });
+      }
+    }
+  );
+
+  app.get("/v1/relationships", async (request, reply) => {
+    const principal = request.identityPrincipal;
+    if (!principal) return reply.code(401).send({ error: "unauthorized" });
+    try {
+      const result = await pool.query<{
+        relationship_id: string; relationship_type: string | null; status: string;
+        current_cycle_id: string; my_role: string; other_user_id: string | null;
+        other_role: string | null; other_display_name: string | null; other_phone_e164: string | null;
+      }>(
+        "SELECT r.id AS relationship_id,r.relationship_type,r.status,r.current_cycle_id," +
+        "me.role_label AS my_role,other.user_id AS other_user_id,other.role_label AS other_role," +
+        "profile.display_name AS other_display_name,other_phone.phone_e164 AS other_phone_e164 " +
+        "FROM ledger.relationships r " +
+        "JOIN ledger.relationship_members me ON me.relationship_id=r.id AND me.user_id=$1::uuid AND me.status='active' " +
+        "LEFT JOIN ledger.relationship_members other ON other.relationship_id=r.id " +
+        "AND other.user_id<>me.user_id AND other.status IN ('active','invited') " +
+        "LEFT JOIN identity.user_profiles profile ON profile.user_id=other.user_id " +
+        "LEFT JOIN LATERAL (SELECT phone_e164 FROM identity.phone_identities " +
+        "WHERE user_id=other.user_id ORDER BY verified_at DESC LIMIT 1) other_phone ON true " +
+        "ORDER BY r.created_at DESC",
+        [principal.userId]
+      );
+      return reply.code(200).send({ relationships: result.rows.map(row => ({
+        relationshipId: row.relationship_id,
+        relationshipType: row.relationship_type,
+        status: row.status,
+        currentCycleId: row.current_cycle_id,
+        myRole: row.my_role,
+        otherParty: row.other_user_id ? {
+          userId: row.other_user_id,
+          role: row.other_role,
+          displayName: row.other_display_name,
+          phoneE164: row.other_phone_e164
+        } : null
+      })) });
+    } catch {
+      return reply.code(500).send({ error: "internal_error" });
+    }
+  });
 
   return app;
 }
