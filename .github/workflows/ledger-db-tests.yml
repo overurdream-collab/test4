@@ -160,3 +160,12 @@ jobs:
         env:
           PGPASSWORD: ledger_test
         run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/tests/014_shared_relationship_read_locks_test.sql
+
+      - name: Apply sharded relationship event cursors
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/migrations/014_sharded_relationship_event_cursors.sql
+      - name: Test sharded relationship event cursors
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/tests/015_sharded_relationship_event_cursors_test.sql
