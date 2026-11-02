@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { appendFile, writeFile } from "node:fs/promises";
 import pg from "pg";
 
 const { Pool } = pg;
@@ -45,12 +46,18 @@ function delta(after, before) {
   return result;
 }
 
+const seed = process.env.BENCH_SEED ?? "ledger-soak-seed-2026-11-02";
+const hotRelationshipShare = Number(process.env.HOT_RELATIONSHIP_SHARE ?? "0.8");
+if (!(hotRelationshipShare >= 0 && hotRelationshipShare <= 1)) throw new Error("HOT_RELATIONSHIP_SHARE must be between 0 and 1");
 const rels = Array.from({ length: 1000 }, (_, i) => ({
-  id: uuidFromMd5("bench-rel-" + (i + 1)),
-  seller: uuidFromMd5("bench-user-" + (i + 1) + "-1"),
-  buyer: uuidFromMd5("bench-user-" + (i + 1) + "-2"),
-  device: uuidFromMd5("bench-device-profile-" + (i + 1))
+  id: uuidFromMd5(seed + "-bench-rel-" + (i + 1)),
+  seller: uuidFromMd5(seed + "-bench-user-" + (i + 1) + "-1"),
+  buyer: uuidFromMd5(seed + "-bench-user-" + (i + 1) + "-2"),
+  device: uuidFromMd5(seed + "-bench-device-profile-" + (i + 1))
 }));
+const hotRelationship = rels[0];
+const reportPath = process.env.BENCH_REPORT_PATH ?? "bench/financial-soak-results.jsonl";
+await writeFile(reportPath, "");
 
 const stageSamples = Object.create(null);
 function recordStage(name, milliseconds) {
@@ -95,7 +102,7 @@ async function snapshot() {
   return { wal: wal.rows[0], database: database.rows[0], statements, statementsError };
 }
 
-async function profilePhase(concurrency, durationMs) {
+async function profilePhase(concurrency, durationMs, repeat) {
   for (const key of Object.keys(stageSamples)) delete stageSamples[key];
   const waitSamples = Object.create(null);
   const lockSamples = Object.create(null);
@@ -151,8 +158,10 @@ async function profilePhase(concurrency, durationMs) {
   await Promise.all(Array.from({ length: concurrency }, async (_, worker) => {
     let localIndex = worker * 23;
     while (Date.now() < deadline) {
-      const rel = rels[localIndex % rels.length];
-      localIndex += concurrency * 7 + 1;
+      const sample = localIndex++;
+      const rel = (sample % 10) < hotRelationshipShare * 10
+        ? hotRelationship
+        : rels[1 + (sample % (rels.length - 1))];
       const start = process.hrtime.bigint();
       try {
         const amountMinor = 1000;
@@ -212,8 +221,12 @@ async function profilePhase(concurrency, durationMs) {
     Object.entries(stageSamples).map(([name, values]) => [name, summarize(values)])
   );
   const report = {
-    label: "financial_lifecycle_profile",
+    label: "financial_lifecycle_soak",
+    seed,
+    repeat,
     concurrency,
+    hotRelationshipId: hotRelationship.id,
+    hotRelationshipShare,
     targetDurationMs: durationMs,
     actualDurationMs,
     completedLifecycles: completed,
@@ -230,7 +243,9 @@ async function profilePhase(concurrency, durationMs) {
     pgStatStatementsError: after.statementsError,
     pgStatStatementsDelta: before.statements && after.statements ? delta(after.statements, before.statements) : null
   };
-  console.log(JSON.stringify(report));
+  const serialized = JSON.stringify(report);
+  console.log(serialized);
+  await appendFile(reportPath, serialized + "\\n");
   if (errors > 0) throw new Error("financial profile had " + errors + " failed lifecycles");
 }
 
@@ -239,9 +254,23 @@ try {
     "SELECT version() AS version, current_setting('shared_buffers') AS shared_buffers, " +
     "current_setting('max_connections') AS max_connections"
   );
-  console.log(JSON.stringify({ profile: "financial lifecycle lock/WAL profile", environment: environment.rows[0] }));
-  await profilePhase(10, 10_000);
-  await profilePhase(50, 10_000);
+  console.log(JSON.stringify({
+    profile: "financial lifecycle hot-relationship soak",
+    seed, hotRelationshipShare, hotRelationshipId: hotRelationship.id,
+    environment: environment.rows[0]
+  }));
+  const concurrency = Number(process.env.SOAK_CONCURRENCY ?? "50");
+  const repeats = Number(process.env.SOAK_REPEATS ?? "3");
+  const durations = (process.env.SOAK_DURATIONS_SECONDS ?? "60,300")
+    .split(",").map(value => Number(value.trim()) * 1000);
+  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 50) throw new Error("SOAK_CONCURRENCY must be 1..50");
+  if (!Number.isInteger(repeats) || repeats < 3) throw new Error("SOAK_REPEATS must be at least 3");
+  if (durations.some(value => !Number.isInteger(value) || value < 1000)) throw new Error("Invalid SOAK_DURATIONS_SECONDS");
+  for (const durationMs of durations) {
+    for (let repeat = 1; repeat <= repeats; repeat++) {
+      await profilePhase(concurrency, durationMs, repeat);
+    }
+  }
 } finally {
   await Promise.all([pool.end(), monitorPool.end()]);
 }
