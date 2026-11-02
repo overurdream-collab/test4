@@ -106,3 +106,13 @@ jobs:
         env:
           PGPASSWORD: ledger_test
         run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/tests/008_full_financial_lifecycle_white_page_test.sql
+
+      - name: Apply approved sales returns and signed credit balances
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/migrations/009_sales_returns_credit_balances.sql
+
+      - name: Run sales return and signed credit balance tests
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/tests/009_sales_returns_credit_balances_test.sql
