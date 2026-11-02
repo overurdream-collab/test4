@@ -5,6 +5,7 @@ on:
     paths:
       - "db/migrations/**"
       - "db/tests/**"
+      - "docs/**"
       - ".github/workflows/ledger-db-tests.yml"
   push:
     branches:
