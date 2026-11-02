@@ -102,4 +102,4 @@ Migration `006_scope_allocation_aggregates.sql` adds `relationship_id` to both p
 - `allocations_by_payment_idx (relationship_id, payment_id)`
 - `allocations_by_obligation_idx (relationship_id, obligation_id)`
 
-This is a targeted query/index alignment fix. It has **not yet been validated by a post-change CI run** at the time of this document update. Re-run the PostgreSQL invariant suite and million-event + lifecycle profile before claiming performance improvement.
+This is a targeted query/index alignment fix. PostgreSQL invariant tests, including a re-run of the obligations/allocation suite after migration 006, passed in Run #66: https://github.com/overurdream-collab/test4/actions/runs/41365623554. API checks passed in Run #38: https://github.com/overurdream-collab/test4/actions/runs/41365623593. The post-change million-event + lifecycle profile is still running as Run #23: https://github.com/overurdream-collab/test4/actions/runs/41365623559. No performance improvement is claimed until that run completes and its results are compared.
