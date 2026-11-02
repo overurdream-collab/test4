@@ -418,7 +418,7 @@ export function buildIdentityApi({
       const expiresAt = new Date(now() + 7 * 24 * 60 * 60 * 1000);
       try {
         const result = await pool.query<{
-          invitation_id: string; relationship_id: string; status: string;
+          invitation_id: string; relationship_id: string; status: string; expires_at: Date | string; created: boolean;
         }>(
           "SELECT * FROM ledger.create_relationship_invitation(" +
           "$1::uuid,$2::uuid,$3::uuid,$4,$5,$6,$7,$8,$9)",
@@ -427,12 +427,12 @@ export function buildIdentityApi({
         );
         const row = result.rows[0];
         if (!row) return reply.code(500).send({ error: "internal_error" });
-        return reply.code(201).send({
+        return reply.code(row.created ? 201 : 200).send({
           invitationId: row.invitation_id,
           relationshipId: row.relationship_id,
           status: row.status,
           inviteePhoneE164: request.body.inviteePhoneE164,
-          expiresAt
+          expiresAt: row.expires_at
         });
       } catch (error) {
         const code = typeof error === "object" && error !== null && "code" in error
