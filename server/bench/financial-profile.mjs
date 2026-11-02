@@ -50,9 +50,9 @@ const seed = process.env.BENCH_SEED ?? "ledger-soak-seed-2026-11-02";
 const hotRelationshipShare = Number(process.env.HOT_RELATIONSHIP_SHARE ?? "0.8");
 if (!(hotRelationshipShare >= 0 && hotRelationshipShare <= 1)) throw new Error("HOT_RELATIONSHIP_SHARE must be between 0 and 1");
 const rels = Array.from({ length: 1000 }, (_, i) => ({
-  id: uuidFromMd5(seed + "-bench-rel-" + (i + 1)),
-  seller: uuidFromMd5(seed + "-bench-user-" + (i + 1) + "-1"),
-  buyer: uuidFromMd5(seed + "-bench-user-" + (i + 1) + "-2"),
+  id: uuidFromMd5("bench-rel-" + (i + 1)),
+  seller: uuidFromMd5("bench-user-" + (i + 1) + "-1"),
+  buyer: uuidFromMd5("bench-user-" + (i + 1) + "-2"),
   device: uuidFromMd5(seed + "-bench-device-profile-" + (i + 1))
 }));
 const hotRelationship = rels[0];
