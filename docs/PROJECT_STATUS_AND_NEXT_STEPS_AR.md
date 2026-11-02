@@ -601,3 +601,28 @@
 - push وPR وCI على PostgreSQL 16.
 - توحيد PrincipalResolver في تركيب إنتاجي واحد مع approval/sync/identity.
 - لا UI ولا نشر ولا قاعدة إنتاجية.
+
+
+## إغلاق الخطوة 4 — سجل أحداث الأجهزة / 2026-11-03
+
+- PR #45: https://github.com/overurdream-collab/test4/pull/45
+- Merge SHA: `9b77d8dc4b220cb01f8a3be7c4866a4338c7e7bd`.
+- Ledger PostgreSQL tests Run `41540205991`: success — migration 013 واختبار 014.
+  https://github.com/overurdream-collab/test4/actions/runs/41540205991
+- Approval API checks Run `41540205787`: success — typecheck و53 اختبار API.
+  https://github.com/overurdream-collab/test4/actions/runs/41540205787
+- Flutter CI Run `41540205818`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41540205818
+- تم الدمج بعد نجاح كل الفحوصات.
+
+### المنجز
+- سجل أجهزة وجلسات append-only مع منع UPDATE/DELETE/TRUNCATE.
+- GET قائمة الأجهزة وأحداث الجهاز بعزل الملكية.
+- 403 لجهاز ملغى في sync و401 لجلسة ملغاة/غير صالحة.
+- اختبار عملية unsent من جهاز ملغى لا تصل إلى قاعدة البيانات.
+
+### المتبقي
+- الخطوة 5 مراجعة تكامل العلاقات والصلاحيات (منفذة غالبًا) واختبارات العزل النهائية.
+- توحيد PrincipalResolver في تركيب إنتاجي واحد مع approval/sync/identity.
+- حل تعارض ترقيم migration مع فرع PR #42 قبل أي دمج له.
+- لا UI ولا نشر ولا قاعدة إنتاجية.
