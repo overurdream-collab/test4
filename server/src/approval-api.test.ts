@@ -210,6 +210,28 @@ test("decides a settlement reset using the authenticated counterparty and idempo
   await app.close();
 });
 
+test("rejected white-page requests keep the relationship active without resetting the cycle", async () => {
+  const app = buildApprovalApi({
+    pool: makePool(async () => ({ rows: [{ decision: "rejected" }] })),
+    resolvePrincipal: async () => ({ userId, deviceId })
+  });
+  const response = await app.inject({
+    method: "POST",
+    url: settlementDecisionUrl,
+    headers: { "idempotency-key": "96000000-0000-0000-0000-000000000005" },
+    payload: { decision: "rejected", reason: "Keep current page" }
+  });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(JSON.parse(response.body), {
+    status: "decided",
+    requestId: decisionId,
+    decision: "rejected",
+    relationshipStatus: "active",
+    cycleReset: false
+  });
+  await app.close();
+});
+
 test("maps self-approval and missing counterparty permission to 403", async () => {
   const app = buildApprovalApi({
     pool: makePool(async () => {
