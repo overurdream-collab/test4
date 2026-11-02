@@ -66,7 +66,7 @@ class FakeSyncServer implements SyncTransport {
   @override
   Future<SyncEventPage> pullEvents({
     required String relationshipId,
-    required int after,
+    required Map<int,int> cursors,
     required int limit,
   }) async {
     if (failNextPull) {
@@ -74,14 +74,14 @@ class FakeSyncServer implements SyncTransport {
       throw const SocketException('network unavailable');
     }
     final all = (feeds[relationshipId] ?? [])
-        .where((event) => event.serverSequence > after)
+        .where((event) => event.serverSequence > (cursors[event.syncShard] ?? 0))
         .toList()
       ..sort((a, b) => a.serverSequence.compareTo(b.serverSequence));
     final hasMore = all.length > limit;
     final events = all.take(limit).toList();
     return SyncEventPage(
       events: events,
-      nextCursor: events.isEmpty ? after : events.last.serverSequence,
+      nextCursor: Map<int,int>.from(cursors)..[0] = events.where((e) => e.syncShard == 0).isEmpty ? (cursors[0] ?? 0) : events.where((e) => e.syncShard == 0).last.serverSequence,
       hasMore: hasMore,
     );
   }
@@ -122,7 +122,7 @@ class AuthRequiredTransport implements SyncTransport {
     required int after,
     required int limit,
   }) async {
-    return SyncEventPage(events: const [], nextCursor: after, hasMore: false);
+    return SyncEventPage(events: const [], nextCursor: cursors, hasMore: false);
   }
 }
 
