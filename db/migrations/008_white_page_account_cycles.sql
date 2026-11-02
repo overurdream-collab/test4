@@ -16,6 +16,9 @@ CREATE TABLE ledger.account_cycles (
          (status = 'archived' AND ended_at IS NOT NULL))
 );
 
+CREATE UNIQUE INDEX account_cycles_one_active_per_relationship_idx
+  ON ledger.account_cycles (relationship_id) WHERE status = 'active';
+
 -- Create the first cycle for every existing relationship. Existing financial
 -- history remains together in that initial cycle; nothing is deleted or moved.
 INSERT INTO ledger.account_cycles
@@ -126,7 +129,8 @@ FOR EACH ROW EXECUTE FUNCTION ledger.assign_journal_account_cycle();
 
 -- Keep the historical all-time view, and add a cycle-scoped view for the
 -- current white page and archived statements.
-CREATE OR REPLACE VIEW ledger.member_currency_positions AS
+DROP VIEW ledger.member_currency_positions;
+CREATE VIEW ledger.member_currency_positions AS
 SELECT
   jt.relationship_id,
   jt.cycle_id,
@@ -417,3 +421,44 @@ BEGIN
   RETURN NEW;
 END;
 $$;
+
+
+-- Ensure operation events carry the cycle identifier so offline clients can
+-- route each event to the current page or its archived statement.
+CREATE OR REPLACE FUNCTION ledger.attach_event_cycle_id()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE source_cycle uuid;
+BEGIN
+  IF NEW.operation_id IS NOT NULL THEN
+    SELECT cycle_id INTO source_cycle FROM ledger.operations
+    WHERE relationship_id = NEW.relationship_id
+      AND operation_id = NEW.operation_id;
+    IF source_cycle IS NOT NULL THEN
+      NEW.event_payload := jsonb_set(
+        NEW.event_payload, '{cycleId}', to_jsonb(source_cycle::text), true
+      );
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER relationship_events_attach_cycle_id
+BEFORE INSERT ON ledger.relationship_events
+FOR EACH ROW EXECUTE FUNCTION ledger.attach_event_cycle_id();
+
+-- Keep allocations within one account cycle.
+CREATE OR REPLACE FUNCTION ledger.assert_allocation_same_cycle()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE pc uuid; oc uuid; ac uuid;
+BEGIN
+ SELECT o.cycle_id INTO pc FROM ledger.payments p JOIN ledger.operations o ON o.operation_id=p.source_operation_id WHERE p.id=NEW.payment_id AND p.relationship_id=NEW.relationship_id;
+ SELECT o.cycle_id INTO oc FROM ledger.obligations b JOIN ledger.operations o ON o.operation_id=b.source_operation_id WHERE b.id=NEW.obligation_id AND b.relationship_id=NEW.relationship_id;
+ SELECT cycle_id INTO ac FROM ledger.operations WHERE operation_id=NEW.source_operation_id AND relationship_id=NEW.relationship_id;
+ IF pc IS NULL OR oc IS NULL OR ac IS NULL OR pc <> oc OR pc <> ac THEN
+   RAISE EXCEPTION 'Allocation must stay within one account cycle' USING ERRCODE='23514';
+ END IF;
+ RETURN NEW;
+END;
+$$;
+CREATE TRIGGER allocations_must_stay_within_cycle BEFORE INSERT ON ledger.allocations FOR EACH ROW EXECUTE FUNCTION ledger.assert_allocation_same_cycle();
