@@ -40,6 +40,34 @@ ALTER TABLE ledger.relationships
     FOREIGN KEY (current_cycle_id, id)
     REFERENCES ledger.account_cycles (id, relationship_id);
 
+-- New relationships are inserted without a cycle ID by existing callers.
+-- Create their first cycle after the relationship row exists, then set the pointer
+-- before the transaction can commit.
+ALTER TABLE ledger.relationships
+  ALTER COLUMN current_cycle_id DROP NOT NULL;
+
+CREATE OR REPLACE FUNCTION ledger.initialize_relationship_account_cycle()
+RETURNS trigger LANGUAGE plpgsql AS $
+DECLARE initial_cycle_id uuid;
+BEGIN
+  IF NEW.current_cycle_id IS NULL THEN
+    INSERT INTO ledger.account_cycles
+      (relationship_id, cycle_number, title, status)
+    VALUES (NEW.id, 1, 'الدورة الأولى', 'active')
+    RETURNING id INTO initial_cycle_id;
+
+    UPDATE ledger.relationships
+    SET current_cycle_id = initial_cycle_id
+    WHERE id = NEW.id;
+  END IF;
+  RETURN NEW;
+END;
+$;
+
+CREATE TRIGGER relationships_initialize_account_cycle
+AFTER INSERT ON ledger.relationships
+FOR EACH ROW EXECUTE FUNCTION ledger.initialize_relationship_account_cycle();
+
 ALTER TABLE ledger.operations ADD COLUMN cycle_id uuid;
 UPDATE ledger.operations o
 SET cycle_id = r.current_cycle_id
