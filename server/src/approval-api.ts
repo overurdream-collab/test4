@@ -39,8 +39,8 @@ function statusForDatabaseError(code: string | undefined): number {
     case "40001":
     case "55000":
     case "23505": return 409;
-    case "22023":
-    case "23514": return 422;
+    case "22023": return 422;
+    case "23514": return 409;
     default: return 500;
   }
 }
