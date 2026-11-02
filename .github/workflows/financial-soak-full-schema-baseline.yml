@@ -70,6 +70,7 @@ jobs:
           echo "SOAK_SEED=mcias-ledger-soak-2026-11-02-v1"
           psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/benchmarks/001_seed_one_million_events.sql
       - name: Run hot-relationship baseline soak
+        continue-on-error: true # Pre-013 baseline is expected to expose deadlocks; retain metrics without failing post-fix PR checks.
         working-directory: server
         env:
           DATABASE_URL: postgres://ledger_test:ledger_test@localhost:5432/ledger_test

@@ -61,3 +61,68 @@ No production database was modified and no deployment occurred. PR #42 remains o
 - PostgreSQL million-event benchmark: run 41480600172 — success.
 - Ledger PostgreSQL tests: run 41480600450 — success.
 - PR: https://github.com/overurdream-collab/test4/pull/42 (open, not merged).
+
+
+---
+
+## استكمال التحقق الكامل للمخطط — 2026-11-02 (Runs 41495182602 / 41495182632)
+
+### تصحيح مهم لطريقة المقارنة
+القياسات القديمة في قسم "Before" أعلاه لا تمثل baseline موثوقًا للمخطط الكامل؛ workflow القديم لم يطبق migrations 007–011. لذلك لا تستخدمها لإثبات تحسن أو تراجع بعد الإصلاح. أُضيف workflow مستقل يعيد بناء المخطط الكامل حتى migration 012 (قبل migration 013) ثم يقارن تشغيل hot بنفس seed والعمال والمدد.
+
+### سبب deadlocks المثبت في baseline الكامل قبل 013
+في migration 011 كانت دالة `ledger.require_two_active_members_for_operations()` تقفل صف العلاقة بـ `FOR UPDATE` عند كل INSERT للعملية. كما كانت حارسا التصفير وتعيين دورة الحساب يستخدمان قفلًا حصريًا. في baseline الكامل قبل 013، أظهر القياس أن التعارض على tuple في `ledger.relationships` نتج عنه deadlocks كثيفة:
+- 60 ثانية، التكرارات 1/2/3: deadlocks = 406 / 442 / 448؛ أخطاء = 503 / 519 / 534.
+- 300 ثانية، التكرارات 1/2/3: deadlocks = 1,570 / 1,218 / 950؛ أخطاء = 1,995 / 1,645 / 1,399.
+- throughput المبلغ عنه منخفض جدًا (0.483–0.841 lifecycle/s) وp95 بين 15,176 و16,073 ms، بسبب فشل المعاملات والانتظار؛ هذه ليست baseline إنتاجية سليمة بل قياس فشل متزامن.
+- blocker samples تشير مباشرة إلى `ledger.relationships` مع `AccessExclusiveLock` في طلبات `accept_operation` المتزامنة.
+
+### الإصلاح الجزئي المثبت في migration 013
+تم تحويل أقفال القراءة في الدوال الثلاث إلى `FOR SHARE`:
+- `guard_operation_during_settlement_reset`
+- `assign_current_account_cycle`
+- `require_two_active_members_for_operations`
+
+يبقى مسار طلب/اعتماد التصفير يستخدم القفل الحصري، لذلك يظل متسلسلًا مع العمليات النشطة ويحمي حد الدورة. اختبار migration 014 يتحقق من تعريف الدوال وبقاء triggers الثلاثة مفعّلة.
+
+### نتائج post-fix — المخطط الكامل، seed موحد، 50 عاملًا
+Run **41495182632**: 12/12 jobs ناجحة. Run **41495182556** (PostgreSQL tests)، **41495182777** (Approval API)، و**41495182784** (million-event benchmark): جميعها success.
+
+| السيناريو | التكرار | المدة | lifecycle/s | p50 ms | p95 ms | p99 ms | الأخطاء | deadlocks |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Hot | 1 | 60s | 100.490 | 456.40 | 1063.37 | 1430.83 | 0 | 0 |
+| Hot | 2 | 60s | 118.318 | 400.07 | 850.41 | 1177.58 | 0 | 0 |
+| Hot | 3 | 60s | 108.712 | 425.81 | 930.88 | 1438.47 | 0 | 0 |
+| Uniform | 1 | 60s | 185.960 | 225.58 | 545.78 | 681.10 | 0 | 0 |
+| Uniform | 2 | 60s | 189.446 | 233.34 | 524.43 | 676.77 | 0 | 0 |
+| Uniform | 3 | 60s | 205.919 | 212.11 | 476.06 | 641.31 | 0 | 0 |
+| Hot | 1 | 300s | 69.173 | 667.02 | 1551.17 | 2050.06 | 0 | 0 |
+| Hot | 2 | 300s | 102.182 | 437.80 | 1098.23 | 1481.38 | 0 | 0 |
+| Hot | 3 | 300s | 68.300 | 680.56 | 1557.22 | 2059.42 | 0 | 0 |
+| Uniform | 1 | 300s | 124.683 | 234.69 | 2196.07 | 2669.01 | 0 | 0 |
+| Uniform | 2 | 300s | 114.981 | 361.16 | 694.13 | 3367.96 | 0 | 0 |
+| Uniform | 3 | 300s | 105.393 | 327.53 | 1306.28 | 3436.67 | 0 | 0 |
+
+Observed hot share: 90.02–90.10%. جميع تشغيلات post-fix بلا أخطاء أو deadlocks.
+
+### ما لم يُحل بعد — bottleneck التالي مثبت
+رغم اختفاء deadlocks الناتجة عن قفل صف العلاقة، لا تزال عينات الحجب في hot 300s تُظهر:
+- `locktype=tuple`, `relation=ledger.relationship_sync_counters`.
+- المتنافسون هم `accept_operation` و`decide_operation`.
+- `decide_operation` يحدّث `operations`، وtrigger `append_operation_state_event` يستدعي `next_relationship_sequence` ثانية لإصدار event. لذلك القبول والقرار يتنافسان على عدّاد العلاقة نفسه.
+- hot 300s p95 بعد الإصلاح: 1098.23–1557.22 ms؛ التكرارات متذبذبة، ولا تحقق معيار تحسن متكرر مثبت.
+- median hot 60s p95 = 930.88 ms، median hot 300s p95 = 1551.17 ms. لا يجوز الادعاء أن مشكلة الأداء حُلّت.
+
+### قرار الاستئناف
+1. migration 013 حلّت مشكلة deadlock في الحراس الثلاثة، وهذا مثبت عبر 3 تكرارات لكل مدة.
+2. لا نغيّر migration 012 أو معنى `server_sequence` قبل فحص جميع مستهلكي cursor/sequence واختبارات offline sync؛ العداد الصفّي هو نقطة التسلسل التي تضمن ترتيب أحداث العلاقة.
+3. التحقيق التالي يجب أن يختبر بدائل تحافظ على cursor semantics: PostgreSQL sequence عالمي/مخصص، أو range leasing مع ضمانات واضحة، أو فصل stream sequence عن event insertion. لا يعتمد أي بديل قبل اختبارات الترتيب، rollback gaps، concurrent accept/approve، وإعادة المزامنة.
+4. لا دمج PR ولا نشر إنتاجي. PR #42 يبقى مفتوحًا.
+
+### Workflow evidence
+- Post-fix full matrix: https://github.com/overurdream-collab/test4/actions/runs/41495182632 — success, 12/12.
+- Full-schema pre-013 diagnostic baseline: https://github.com/overurdream-collab/test4/actions/runs/41495182602 — expected failures captured (all 6 jobs); demonstrates relationship-row deadlocks.
+- PostgreSQL: https://github.com/overurdream-collab/test4/actions/runs/41495182556 — success.
+- Approval API: https://github.com/overurdream-collab/test4/actions/runs/41495182777 — success.
+- Million-event benchmark: https://github.com/overurdream-collab/test4/actions/runs/41495182784 — success.
+- Branch head before this documentation update: `dd319834c3fcc70752f82b94fcf9c99e86f0abcd`.
