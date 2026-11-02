@@ -150,5 +150,61 @@ export function buildApprovalApi({
     }
   );
 
+  app.post<{ Params: { relationshipId: string } }>(
+    "/v1/relationships/:relationshipId/settlement-reset-requests",
+    {
+      schema: {
+        params: {
+          type: "object",
+          required: ["relationshipId"],
+          properties: { relationshipId: { type: "string", format: "uuid" } }
+        },
+        headers: {
+          type: "object",
+          required: ["idempotency-key"],
+          properties: { "idempotency-key": { type: "string", format: "uuid" } }
+        },
+        body: { type: "object", additionalProperties: false }
+      }
+    },
+    async (request, reply) => {
+      const idempotencyKey = request.headers["idempotency-key"];
+      if (typeof idempotencyKey !== "string" || !UUID.test(idempotencyKey)) {
+        return reply.code(400).send({ error: "invalid_idempotency_key" });
+      }
+      const principal = request.principal;
+      if (!principal) return reply.code(401).send({ error: "unauthorized" });
+
+      try {
+        const result = await pool.query<{ request_id: string }>(
+          "SELECT ledger.request_settlement_reset($1::uuid,$2::uuid,$3::uuid) AS request_id",
+          [idempotencyKey, request.params.relationshipId, principal.userId]
+        );
+        const requestId = result.rows[0]?.request_id;
+        if (requestId !== idempotencyKey) {
+          request.log.error("Settlement request function returned an unexpected request ID");
+          return reply.code(500).send({ error: "internal_error" });
+        }
+        return reply.code(201).send({ status: "requested", requestId });
+      } catch (error) {
+        const code =
+          typeof error === "object" && error !== null && "code" in error
+            ? String((error as { code: unknown }).code)
+            : undefined;
+        if (code === "23514") {
+          return reply.code(409).send({ error: "settlement_not_complete" });
+        }
+        const status = statusForDatabaseError(code);
+        if (status === 500) {
+          request.log.error({ err: error }, "Settlement reset request failed");
+          return reply.code(500).send({ error: "internal_error" });
+        }
+        const errorCode = status === 403 ? "forbidden" : status === 404 ? "not_found" :
+          status === 409 ? "conflict" : "validation_error";
+        return reply.code(status).send({ error: errorCode });
+      }
+    }
+  );
+
   return app;
 }
