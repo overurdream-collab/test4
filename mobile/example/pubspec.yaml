@@ -1,0 +1,25 @@
+name: shared_ledger_sqlcipher_example
+description: Android host for SQLCipher integration tests.
+publish_to: none
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.9.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_secure_storage: 11.2.0
+  shared_ledger_mobile_core:
+    path: ../
+  sqflite_sqlcipher: 3.4.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  integration_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true

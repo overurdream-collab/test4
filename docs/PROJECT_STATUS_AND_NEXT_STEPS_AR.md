@@ -626,3 +626,34 @@
 - توحيد PrincipalResolver في تركيب إنتاجي واحد مع approval/sync/identity.
 - حل تعارض ترقيم migration مع فرع PR #42 قبل أي دمج له.
 - لا UI ولا نشر ولا قاعدة إنتاجية.
+
+
+## الخطوة 6 — إثبات SQLCipher على Android (فرع محلي)
+
+### الحالة
+- الفرع: `feat/sqlcipher-decision-a`.
+- القرار المعتمد: A — الإبقاء على `sqflite_sqlcipher` 3.4.1 مع تثبيت الإصدار والبصمة.
+- لم يُدفع الفرع بعد في هذه اللحظة، ولم يُشغّل Android CI؛ لا يوجد Run URL ولا ادعاء PASS للتشفير على Android.
+
+### المنفَّذ
+- `mobile/pubspec.lock` و`mobile/example/pubspec.lock`: تثبيت الإصدارات وبصمات pub.dev.
+- `mobile/lib/src/offline_store.dart`: اسم مفتاح عام قابل للاختبار، typedef لعامل فتح القاعدة، وعامل فتح اختياري مع بقاء SQLCipher هو الافتراضي.
+- `mobile/test/offline_store_contract.dart`: عقد سلوكي قابل لإعادة الاستخدام عند الترحيل.
+- `mobile/test/offline_store_test.dart`: يشغّل العقد على FFI للاختبارات السريعة.
+- `mobile/example`: مضيف Android مستقل لاختبار SQLCipher الفعلي.
+- `mobile/example/integration_test/encrypted_store_test.dart`: فحص عدم وجود marker نصي في DB/WAL/SHM/JOURNAL، رأس SQLite غير مشفر، المفتاح الخاطئ، إعادة الفتح، والمفتاح القصير.
+- `.github/workflows/android-sqlcipher.yml`: Android Emulator API 34 x86_64 مع Flutter 3.44.6 وJava 17.
+- `docs/SQLCIPHER_DECISION_AUDIT_AR.md`: تدقيق المصدر والاعتماديات والمخاطر ومعايير الخروج.
+- `docs/DECISION_REGISTER_AR.md`: إضافة قرار SQLCipher وشرط إعادة التدقيق عند أي ترقية.
+
+### الأدلة المحلية
+- `flutter test`: 9 اختبارات ناجحة، 0 فشل (بعد إضافة العقد).
+- `flutter analyze` للحزمة: لا مشاكل.
+- `flutter analyze` لمضيف Android: لا مشاكل.
+- محاولة `flutter build apk --debug` محليًا على Windows لم تكتمل بسبب نفاد مساحة القرص (`There is not enough space on the disk`)، وليس بسبب خطأ كود. البناء سيتحقق في CI.
+
+### المتبقي قبل الإغلاق
+- push وPR وتشغيل `Android SQLCipher checks` و`Flutter CI` و`Mobile offline store checks`.
+- الحصول على Run URLs وSHA مدموج.
+- نجاح اختبار Android الفعلي؛ بدونه لا يُعد التشفير مثبتًا على الجهاز.
+- تحديث هذا المستند وWorklog وHandoff بعد الدمج.
