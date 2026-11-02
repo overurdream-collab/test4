@@ -1,6 +1,6 @@
 # مخطط قاعدة البيانات ERD — الدفتر التجاري المشترك
 
-**الحالة:** مخطط as-built لجداول migrations 001–009 على main؛ لا يخلط الجداول المنفذة بالكيانات المستقبلية.  
+**الحالة:** مخطط as-built لـ ledger migrations 001–009، وidentity migration 010 موضح في القسم 6؛ لا يخلط الجداول المنفذة بالكيانات المستقبلية.  
 **المراجعة:** 2026-11-02 | **قاعدة الاختبار:** PostgreSQL 16، CI Run #131.
 
 > معرفات المستخدمين خارجية في هذه النسخة؛ لا يوجد جدول users ضمن schema ledger. الرسم يعرض الجداول الفعلية فقط.
@@ -232,3 +232,80 @@ erDiagram
 **تحديث بعد PR #25–#28:** أضيفت sales_returns في migration 009، وأصبح API يعرض partyBalanceMinor بإشارة موجبة/سالبة لكل طرف. PostgreSQL Run #131 وApproval API Run #66 ناجحان. راجع ملف التسليم لأرقام SHA وروابط التشغيل.
 
 **تنبيه:** الرسم يوضح الكيانات وروابطها. ملفات SQL هي المرجع النهائي لأنواع القيود المركبة وCHECK والفهارس وtriggers.
+
+## 6. مخطط الهوية والأجهزة — migration 010
+
+الجداول التالية منفذة في schema منفصل باسم `identity`، وليست جزءًا من دفتر `ledger`:
+
+```mermaid
+erDiagram
+ USERS ||--o| USER_PROFILES : profile
+ USERS ||--o{ PHONE_IDENTITIES : verified_phones
+ USERS ||--o{ DEVICES : owns
+ USERS ||--o{ AUTH_SESSIONS : sessions
+ DEVICES ||--o{ AUTH_SESSIONS : session_device
+ OTP_CHALLENGES {
+  uuid id PK
+  text phone_e164
+  text purpose
+  bytea code_hash
+  bytea requested_ip_hash
+  text status
+  smallint attempts
+  timestamptz created_at
+  timestamptz expires_at
+  timestamptz consumed_at
+ }
+ USERS {
+  uuid id PK
+  text status
+  timestamptz created_at
+ }
+ USER_PROFILES {
+  uuid user_id PK,FK
+  text display_name
+  text locale
+  timestamptz updated_at
+ }
+ PHONE_IDENTITIES {
+  uuid id PK
+  uuid user_id FK
+  text phone_e164 UK
+  timestamptz verified_at
+ }
+ DEVICES {
+  uuid id PK
+  uuid user_id FK
+  text device_label
+  text platform
+  text status
+  timestamptz registered_at
+  timestamptz last_seen_at
+  timestamptz revoked_at
+ }
+ AUTH_SESSIONS {
+  uuid id PK
+  uuid user_id FK
+  uuid device_id FK
+  timestamptz created_at
+  timestamptz expires_at
+  timestamptz revoked_at
+ }
+```
+
+| الجدول | المسؤولية |
+|---|---|
+| identity.users | حساب المستخدم الموحد وحالته |
+| identity.phone_identities | أرقام الهاتف الموثقة؛ الرقم الواحد لحساب واحد |
+| identity.user_profiles | الاسم الظاهر واللغة |
+| identity.devices | الأجهزة النشطة أو الملغاة |
+| identity.auth_sessions | جلسات access token قصيرة العمر، مرتبطة بالمستخدم والجهاز |
+| identity.otp_challenges | تحديات OTP؛ يخزن HMAC digest لا الرمز النصي |
+
+### حدود الربط الحالية
+- `identity.users.id` هو معرف الحساب الذي يعيده مسار OTP.
+- جداول `ledger.relationship_members.user_id` لا تحمل حتى الآن FK مباشرًا إلى `identity.users`؛ هذا مقصود مؤقتًا للحفاظ على بيانات/اختبارات ledger السابقة التي استخدمت معرفات خارجية. يجب أن ينشئ مسار العلاقات عضوية بمعرف حساب موثق، ثم يمكن إضافة قيد FK بعد ترحيل/مطابقة البيانات بأمان.
+- لا توجد بعد جداول دعوات/طلبات ربط العلاقات في migration 010.
+- لا يوجد مزود SMS فعلي أو refresh token؛ لا تعتبر وجود OTP adapter مصادقة إنتاجية مكتملة.
+
+
