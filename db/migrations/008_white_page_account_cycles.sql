@@ -462,3 +462,25 @@ BEGIN
 END;
 $$;
 CREATE TRIGGER allocations_must_stay_within_cycle BEFORE INSERT ON ledger.allocations FOR EACH ROW EXECUTE FUNCTION ledger.assert_allocation_same_cycle();
+
+
+CREATE OR REPLACE FUNCTION ledger.append_settlement_request_event()
+RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE next_sequence bigint;
+BEGIN
+  next_sequence := ledger.next_relationship_sequence(NEW.relationship_id);
+  INSERT INTO ledger.relationship_events (
+    relationship_id, server_sequence, event_id, operation_id, event_type, event_payload
+  ) VALUES (
+    NEW.relationship_id, next_sequence, gen_random_uuid(), NULL,
+    'settlement.reset_requested',
+    jsonb_build_object(
+      'requestId', NEW.id,
+      'requestedByUserId', NEW.requested_by_user_id,
+      'cycleId', NEW.cycle_id,
+      'requestedAt', NEW.requested_at
+    )
+  );
+  RETURN NEW;
+END;
+$$;
