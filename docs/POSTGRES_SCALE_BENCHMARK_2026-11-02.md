@@ -102,9 +102,34 @@ Migration `006_scope_allocation_aggregates.sql` adds `relationship_id` to both p
 - `allocations_by_payment_idx (relationship_id, payment_id)`
 - `allocations_by_obligation_idx (relationship_id, obligation_id)`
 
-This is a targeted query/index alignment fix. PostgreSQL invariant tests, including a re-run of the obligations/allocation suite after migration 006, passed in Run #66: https://github.com/overurdream-collab/test4/actions/runs/41365623554. API checks passed in Run #38: https://github.com/overurdream-collab/test4/actions/runs/41365623593. Post-change million-event + lifecycle profile completed successfully in Run #23: https://github.com/overurdream-collab/test4/actions/runs/41365623559. At 50 workers, the five-second lifecycle benchmark improved from 133.20 to 189.57 lifecycles/s (+42%), while p95 improved from 579.72 ms to 507.03 ms (-13%). The instrumented 10-second profile improved from 80.01 to 181.66 lifecycles/s at 50 workers (+127%), with p95 improving from 817.83 ms to 599.31 ms (-27%). Allocation approval/posting p95 at 50 workers fell from 362.47 ms to 148.22 ms. At 10 workers, the profile throughput improved from 104.01 to 152.36/s, but full-lifecycle p95 rose from 124.73 to 226.71 ms; the short runs and runner variability mean this tail regression must be investigated with repeated/longer measurements. WALWrite/WALSync samples remain visible, so this is not a complete saturation fix. All runs had zero financial lifecycle errors and zero deadlocks. Treat these as directional CI results, not production capacity.
+This is a targeted query/index alignment fix. PostgreSQL invariant tests, including a re-run of the obligations/allocation suite after migration 006, passed in Run #66: https://github.com/overurdream-collab/test4/actions/runs/41365623554. API checks passed in Run #38: https://github.com/overurdream-collab/test4/actions/runs/41365623593. Post-change million-event + lifecycle profile completed successfully in Run #23: https://github.com/overurdream-collab/test4/actions/runs/41365623559. Run #23 initially showed a 50-worker improvement (189.57 lifecycles/s and p95 507.03 ms; instrumented 181.66/s and p95 599.31 ms), but the later repeat Run #33 did not reproduce it (137.16/s and p95 591.58 ms; instrumented 85.39/s and p95 764.32 ms). At 10 workers, tail latency also varied. These short CI runs show material runner variability; a repeatable performance improvement is not established. WALWrite/WALSync samples remain visible. All runs had zero financial lifecycle errors and zero deadlocks. Treat these as diagnostic CI results, not production capacity.
 
 
 ### Post-migration 006 result summary
 
 The targeted allocation predicate change was validated by both the PostgreSQL invariant suite (Run #66) and the 1M-row benchmark/profile (Run #23). The 50-worker full-lifecycle throughput and p95 improved in this run. The 10-worker p95 did not improve, and WAL-related waits remain. Do not describe the bottleneck as eliminated; next work is repeated 60–300 second runs, hot-relationship skew, and WAL/CPU attribution before deciding whether further optimization is warranted.
+
+
+## Repeat after final settlement query scoping — PR #14, Run #33
+
+**Workflow:** https://github.com/overurdream-collab/test4/actions/runs/41366383568  
+**Result:** Success. PostgreSQL 16.15; 1,000 synthetic relationships and 1M operation/event seed. No financial lifecycle errors or deadlocks.
+
+| Workers | Complete lifecycle throughput/s | p50 | p95 | p99 |
+|---:|---:|---:|---:|---:|
+| 1 | 131.92 | 7.57 ms | 9.18 ms | 9.91 ms |
+| 10 | 179.79 | 47.69 ms | 66.33 ms | 304.49 ms |
+| 50 | 137.16 | 341.53 ms | 591.58 ms | 848.60 ms |
+
+The instrumented profile reported:
+- 10 workers: 110.20 lifecycles/s, p95 116.98 ms.
+- 50 workers: 85.39 lifecycles/s, p95 764.32 ms.
+- At 50 workers, allocation approval/posting p95 was 310.52 ms; sampled waits again included CPU/running and WALWrite/WALInsert. No deadlocks were recorded.
+
+### Performance interpretation
+
+Run #23 showed a stronger 50-worker result after migration 006 (189.57 lifecycles/s and p95 507.03 ms in the five-second benchmark; instrumented profile 181.66/s and p95 599.31 ms). Run #33 did not reproduce that improvement (137.16/s and p95 591.58 ms; instrumented 85.39/s and p95 764.32 ms). The runs are short and show substantial CI variability. Therefore:
+
+- Migration 006 is retained as a correctness-preserving query/index alignment improvement; PostgreSQL invariant tests pass.
+- **A repeatable throughput or latency improvement is not established.**
+- Do not use these measurements to claim capacity. Next performance work requires repeated 60–300 second runs, fixed runner conditions, hot-relationship skew, and explicit CPU/WAL attribution.
