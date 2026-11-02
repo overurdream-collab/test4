@@ -9,12 +9,14 @@ class SyncAcceptance {
     required this.businessState,
     required this.serverVersion,
     required this.serverSequence,
+    this.syncShard = 0,
   });
 
   final String outcome;
   final String businessState;
   final int serverVersion;
   final int serverSequence;
+  final int syncShard;
 }
 
 class SyncEventPage {
@@ -25,7 +27,7 @@ class SyncEventPage {
   });
 
   final List<SyncEvent> events;
-  final int nextCursor;
+  final Map<int,int> nextCursor;
   final bool hasMore;
 }
 
@@ -34,7 +36,7 @@ abstract interface class SyncTransport {
 
   Future<SyncEventPage> pullEvents({
     required String relationshipId,
-    required int after,
+    required Map<int,int> cursors,
     required int limit,
   });
 }
@@ -134,6 +136,7 @@ class SyncCoordinator {
           businessState: response.businessState,
           serverVersion: response.serverVersion,
           serverSequence: response.serverSequence,
+          syncShard: response.syncShard,
         );
         accepted++;
       } on SyncConflictException catch (error) {
@@ -163,23 +166,17 @@ class SyncCoordinator {
 
     var pages = 0;
     while (pages < maxPages) {
-      final cursor = await store.syncCursor(relationshipId);
+      final cursor = await store.syncCursors(relationshipId);
       final page = await transport.pullEvents(
         relationshipId: relationshipId,
-        after: cursor,
+        cursors: cursor,
         limit: pageSize,
       );
-      if (page.events.isEmpty) {
-        if (page.hasMore) {
-          throw StateError('Server returned hasMore with an empty event page');
-        }
-        break;
+      if (page.events.isEmpty && page.hasMore) {
+        throw StateError('Server returned hasMore with an empty event page');
       }
-      final expectedNext = page.events.last.serverSequence;
-      if (page.nextCursor != expectedNext) {
-        throw StateError('Server nextCursor does not match the last returned event');
-      }
-      await store.applyEvents(relationshipId, page.events);
+      await store.applyEvents(relationshipId, page.events, nextCursor: page.nextCursor);
+      if (page.events.isEmpty) break;
       eventsApplied += page.events.length;
       pages++;
       if (!page.hasMore) break;
