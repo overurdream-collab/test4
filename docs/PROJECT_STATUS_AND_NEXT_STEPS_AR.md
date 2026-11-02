@@ -516,3 +516,34 @@
 - واجهة المستخدم للمرتجعات، رد نقدي فعلي، وتطبيق الرصيد الدائن على مشتريات لاحقة.
 - قياس أداء أطول على runner ثابت قبل أي تحسين بنيوي أو إعلان سعة.
 - تقوية refresh-token rotation/reuse detection/logout وربط الجلسات بتركيب APIs موحد.
+
+
+## تحديث 2026-11-03 — دوران refresh token وتسجيل الخروج (فرع محلي)
+
+### الحالة
+- الفرع: `feat/identity-refresh-logout`.
+- Commit محلي: `c3e9305b838f0bf52ece497b2785f9b415bafae4`.
+- لم يُدفع الفرع ولم يُنشأ PR ولم يُشغّل CI من هذه البيئة؛ لا يوجد Run URL ولا ادعاء PASS.
+
+### المنفَّذ
+- `db/migrations/012_identity_refresh_tokens.sql`: جدول `identity.refresh_tokens` يخزّن HMAC-SHA256 فقط، ودالة `identity.rotate_refresh_token`، ودالة `identity.revoke_device_sessions`.
+- الدوران يبطل التوكن القديم ويربطه بالجديد، ويكشف إعادة الاستخدام ويبطل الجلسة وكل توكناتها، ويعالج الانتهاء والجلسة/الجهاز غير النشط.
+- `server/src/identity-api.ts`: إرجاع refresh token عند OTP verify، و`POST /v1/auth/refresh`، و`POST /v1/auth/logout`، وإبطال refresh tokens عند إلغاء الجهاز.
+- مدة access token تبقى 15 دقيقة، والجلسة/refresh token 30 يومًا.
+- `db/tests/013_identity_refresh_tokens_test.sql`: دوران ناجح، كشف إعادة استخدام، توكن مجهول، منتهٍ، جهاز ملغى، وتسجيل خروج.
+- تحديث `.github/workflows/ledger-db-tests.yml` لتطبيق migration 012 وتشغيل الاختبار 013.
+- `docs/OTP_PROVIDER_COMPARISON_AR.md`: مقارنة تصميمية لمزودات OTP دون شراء أو إرسال حقيقي.
+- `.gitignore` يحمي `server/node_modules/` من الإضافة العرضية.
+
+### المختبَر محليًا
+- `npm run typecheck`: نجح.
+- `npm test`: 48 اختبارًا ناجحًا، 0 فشل.
+- كل migrations 001–012 واختبارات DB 001–013 نجحت على PostgreSQL 18.6 مضمّن محلي، بعد إعادة إنشاء قاعدة نظيفة.
+- ملاحظة: CI يستخدم PostgreSQL 16؛ لم يُشغّل هناك بعد.
+
+### المتبقي
+- دفع الفرع وإنشاء PR وتشغيل CI والحصول على Run URL وSHA مدموج قبل أي وصف بالاكتمال.
+- GET قائمة الأجهزة وسجل أحداث أجهزة غير قابل للتعديل (الخطوة 4).
+- توحيد `PrincipalResolver` في تركيب الإنتاج مع approval/sync/identity.
+- مواءمة migration sharding من PR #42 مع ترقيم migrations الحالي قبل أي دمج.
+- لا UI ولا نشر ولا مزود SMS حقيقي ولا قاعدة إنتاجية.
