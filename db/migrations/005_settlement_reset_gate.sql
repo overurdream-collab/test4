@@ -24,8 +24,8 @@ DECLARE
   unapplied_payments numeric;
   pending_operations bigint;
 BEGIN
-  -- Serialize settlement checks with other requests and financial posting by
-  -- locking the relationship row. Financial events remain immutable.
+  -- Serialize concurrent settlement-reset requests for this relationship.
+  -- This request is an eligibility snapshot; a later approval must revalidate settlement.
   PERFORM 1 FROM ledger.relationships
   WHERE id = p_relationship_id AND status = 'active'
   FOR UPDATE;
