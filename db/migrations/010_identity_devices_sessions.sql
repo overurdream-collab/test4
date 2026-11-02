@@ -138,3 +138,32 @@ BEGIN
   RETURN target_user;
 END;
 $$;
+
+-- Consume only the newest live challenge; failed guesses count and lock at five.
+-- The application supplies an HMAC-SHA256 digest; plaintext OTP is never stored.
+CREATE OR REPLACE FUNCTION identity.consume_otp_challenge(
+  p_phone_e164 text,p_code_hash bytea,p_now timestamptz DEFAULT clock_timestamp()
+) RETURNS boolean LANGUAGE plpgsql AS $otp_consume$
+DECLARE challenge identity.otp_challenges%ROWTYPE;
+BEGIN
+  IF p_code_hash IS NULL OR octet_length(p_code_hash)<>32 THEN RETURN false; END IF;
+  SELECT * INTO challenge FROM identity.otp_challenges
+  WHERE phone_e164=p_phone_e164 AND purpose='login' AND status='delivered' AND consumed_at IS NULL
+  ORDER BY created_at DESC LIMIT 1 FOR UPDATE;
+  IF NOT FOUND THEN RETURN false; END IF;
+  IF challenge.expires_at<=p_now THEN
+    UPDATE identity.otp_challenges SET status='expired' WHERE id=challenge.id;
+    RETURN false;
+  END IF;
+  IF challenge.attempts>=5 THEN
+    UPDATE identity.otp_challenges SET status='locked' WHERE id=challenge.id;
+    RETURN false;
+  END IF;
+  IF challenge.code_hash=p_code_hash THEN
+    UPDATE identity.otp_challenges SET status='consumed',consumed_at=p_now,attempts=attempts+1 WHERE id=challenge.id;
+    RETURN true;
+  END IF;
+  UPDATE identity.otp_challenges SET attempts=attempts+1,status=CASE WHEN attempts+1>=5 THEN 'locked' ELSE status END WHERE id=challenge.id;
+  RETURN false;
+END;
+$otp_consume$;
