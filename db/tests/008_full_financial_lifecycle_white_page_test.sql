@@ -134,7 +134,7 @@ BEGIN
     RAISE EXCEPTION 'Fully allocated lifecycle should clear all four account classes; nonzero groups %',nonzero_classes;
   END IF;
 END;
-$;
+$balance_after_allocation$;
 -- A separate approved allocation-command fixture remains pinned to the old cycle.
 -- It is not posted to the journal; it exists solely to isolate the cycle guard.
 INSERT INTO ledger.operations
