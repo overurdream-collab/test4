@@ -1,6 +1,7 @@
 import {
   createHash,
   createHmac,
+  randomBytes,
   randomInt,
   randomUUID,
   timingSafeEqual
@@ -21,6 +22,7 @@ type IdentityDependencies = {
   otpDelivery: OtpDeliveryAdapter;
   otpPepper: string;
   accessTokenSecret: string;
+  refreshTokenPepper?: string;
   now?: () => number;
 };
 
@@ -54,9 +56,19 @@ const PHONE = /^\+[1-9][0-9]{7,14}$/;
 const ISSUER = "shared-commercial-ledger";
 const AUDIENCE = "shared-ledger-mobile";
 const ACCESS_TTL_SECONDS = 15 * 60;
+const REFRESH_TTL_SECONDS = 30 * 24 * 60 * 60;
 
 function hmac(secret: string, value: string): Buffer {
   return createHmac("sha256", secret).update(value, "utf8").digest();
+}
+
+function createRefreshToken(secret: string): { token: string; hash: Buffer } {
+  const token = randomBytes(32).toString("base64url");
+  return { token, hash: hmac(secret, "refresh:" + token) };
+}
+
+function hashRefreshToken(secret: string, token: string): Buffer {
+  return hmac(secret, "refresh:" + token);
 }
 
 function signAccessToken(claims: AccessClaims, secret: string): string {
@@ -129,6 +141,7 @@ export function buildIdentityApi({
   otpDelivery,
   otpPepper,
   accessTokenSecret,
+  refreshTokenPepper = accessTokenSecret,
   now = Date.now
 }: IdentityDependencies): FastifyInstance {
   if (Buffer.byteLength(otpPepper, "utf8") < 32) {
@@ -137,6 +150,9 @@ export function buildIdentityApi({
   if (Buffer.byteLength(accessTokenSecret, "utf8") < 32) {
     throw new Error("ACCESS_TOKEN_SECRET must be at least 32 bytes");
   }
+  if (Buffer.byteLength(refreshTokenPepper, "utf8") < 32) {
+    throw new Error("REFRESH_TOKEN_PEPPER must be at least 32 bytes");
+  }
 
   const app = Fastify({ logger: false });
   app.decorateRequest("identityPrincipal", null);
@@ -144,7 +160,7 @@ export function buildIdentityApi({
 
   app.addHook("preHandler", async (request, reply) => {
     const path = request.url.split("?")[0];
-    if (path === "/v1/auth/otp/request" || path === "/v1/auth/otp/verify") return;
+    if (path === "/v1/auth/otp/request" || path === "/v1/auth/otp/verify" || path === "/v1/auth/refresh") return;
     try {
       const principal = await resolvePrincipal(request);
       if (!principal) return reply.code(401).send({ error: "unauthorized" });
@@ -252,10 +268,18 @@ export function buildIdentityApi({
         const sessionId = randomUUID();
         const issuedAt = Math.floor(now() / 1000);
         const expiresAt = new Date((issuedAt + ACCESS_TTL_SECONDS) * 1000);
+        const sessionExpiresAt = new Date((issuedAt + REFRESH_TTL_SECONDS) * 1000);
         await pool.query(
           "INSERT INTO identity.auth_sessions(id,user_id,device_id,expires_at) " +
           "VALUES($1::uuid,$2::uuid,$3::uuid,$4)",
-          [sessionId, userId, body.deviceId, expiresAt]
+          [sessionId, userId, body.deviceId, sessionExpiresAt]
+        );
+        const refresh = createRefreshToken(refreshTokenPepper);
+        const refreshTokenId = randomUUID();
+        await pool.query(
+          "INSERT INTO identity.refresh_tokens(id,session_id,user_id,device_id,token_hash,expires_at) " +
+          "VALUES($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5,$6)",
+          [refreshTokenId, sessionId, userId, body.deviceId, refresh.hash, sessionExpiresAt]
         );
         const accessToken = signAccessToken({
           iss: ISSUER, aud: AUDIENCE, sub: userId, did: body.deviceId,
@@ -263,6 +287,7 @@ export function buildIdentityApi({
         }, accessTokenSecret);
         return reply.code(200).send({
           accessToken, tokenType: "Bearer", expiresAt,
+          refreshToken: refresh.token, refreshExpiresAt: sessionExpiresAt,
           user: { id: userId, phoneE164: body.phoneE164 },
           deviceId: body.deviceId
         });
@@ -271,6 +296,72 @@ export function buildIdentityApi({
           ? String((error as { code: unknown }).code) : undefined;
         if (code === "42501") return reply.code(403).send({ error: "account_suspended" });
         if (code === "23505") return reply.code(409).send({ error: "device_unavailable" });
+        return reply.code(500).send({ error: "internal_error" });
+      }
+    }
+  );
+
+  app.post<{ Body: { refreshToken: string } }>(
+    "/v1/auth/refresh",
+    {
+      schema: {
+        body: {
+          type: "object", additionalProperties: false, required: ["refreshToken"],
+          properties: { refreshToken: { type: "string", minLength: 20, maxLength: 200 } }
+        }
+      }
+    },
+    async (request, reply) => {
+      const refreshToken = request.body.refreshToken;
+      if (typeof refreshToken !== "string" || refreshToken.length < 20) {
+        return reply.code(400).send({ error: "invalid_refresh_token" });
+      }
+      const issuedAt = Math.floor(now() / 1000);
+      const nextRefresh = createRefreshToken(refreshTokenPepper);
+      const nextRefreshId = randomUUID();
+      const refreshExpiresAt = new Date((issuedAt + REFRESH_TTL_SECONDS) * 1000);
+      try {
+        const result = await pool.query<{
+          status: string; user_id: string | null; device_id: string | null; session_id: string | null;
+        }>(
+          "SELECT status,user_id,device_id,session_id FROM identity.rotate_refresh_token($1,$2,$3,$4)",
+          [hashRefreshToken(refreshTokenPepper, refreshToken), nextRefreshId, nextRefresh.hash, refreshExpiresAt]
+        );
+        const row = result.rows[0];
+        if (!row || row.status !== "rotated" || !row.user_id || !row.device_id || !row.session_id) {
+          return reply.code(401).send({ error: "invalid_refresh_token" });
+        }
+        const expiresAt = new Date((issuedAt + ACCESS_TTL_SECONDS) * 1000);
+        const accessToken = signAccessToken({
+          iss: ISSUER, aud: AUDIENCE, sub: row.user_id, did: row.device_id,
+          jti: row.session_id, iat: issuedAt, exp: issuedAt + ACCESS_TTL_SECONDS
+        }, accessTokenSecret);
+        return reply.code(200).send({
+          accessToken, tokenType: "Bearer", expiresAt,
+          refreshToken: nextRefresh.token, refreshExpiresAt
+        });
+      } catch (error) {
+        const code = typeof error === "object" && error !== null && "code" in error
+          ? String((error as { code: unknown }).code) : undefined;
+        if (code === "22023") return reply.code(400).send({ error: "invalid_refresh_token" });
+        return reply.code(500).send({ error: "internal_error" });
+      }
+    }
+  );
+
+  app.post(
+    "/v1/auth/logout",
+    { schema: { body: { type: "object", additionalProperties: false } } },
+    async (request, reply) => {
+      const principal = request.identityPrincipal;
+      if (!principal) return reply.code(401).send({ error: "unauthorized" });
+      try {
+        await pool.query(
+          "SELECT identity.revoke_device_sessions($1::uuid,$2::uuid) AS revoked",
+          [principal.userId, principal.deviceId]
+        );
+        return reply.code(200).send({ status: "logged_out" });
+      } catch {
         return reply.code(500).send({ error: "internal_error" });
       }
     }
@@ -355,6 +446,10 @@ export function buildIdentityApi({
           "), revoked_sessions AS (" +
           " UPDATE identity.auth_sessions SET revoked_at=now() " +
           " WHERE device_id IN (SELECT id FROM revoked_device) AND user_id=$2::uuid AND revoked_at IS NULL" +
+          " RETURNING id" +
+          "), revoked_refresh AS (" +
+          " UPDATE identity.refresh_tokens SET revoked_at=now() " +
+          " WHERE session_id IN (SELECT id FROM revoked_sessions) AND user_id=$2::uuid AND revoked_at IS NULL" +
           ") SELECT id FROM revoked_device",
           [request.params.deviceId, principal.userId]
         );
