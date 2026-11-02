@@ -142,7 +142,7 @@ BEGIN
   SELECT user_id INTO invitee_id FROM identity.phone_identities
   WHERE phone_e164=p_invitee_phone_e164;
   IF invitee_id IS NOT NULL AND NOT EXISTS
-     (SELECT 1 FROM identity.users WHERE id=invitee_id AND status='active') THEN
+     (SELECT 1 FROM identity.users u WHERE u.id=invitee_id AND u.status='active') THEN
     RAISE EXCEPTION 'Invitee account is not active' USING ERRCODE='42501';
   END IF;
   INSERT INTO ledger.relationships(id,status,relationship_type,created_by_user_id)
