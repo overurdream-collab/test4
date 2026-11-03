@@ -855,3 +855,65 @@
 - الرصيد الدائن يبقى ظاهرًا في الدورة المؤرشفة؛ لا توجد عملية رد نقدي أو استخدام للرصيد في دورة جديدة.
 - هذا حل مؤقت متفق عليه، وليس إغلاقًا محاسبيًا نهائيًا لرصيد المرتجع.
 - التالي: E2E جهازين/offline وإعادة الاتصال، ثم معالجة السياسة المالية للرصيد الدائن لاحقًا.
+
+
+## مفتاح إيقاف المرتجعات للأدمن / 2026-11-03
+
+### القرار والسلوك
+- أُضيف مفتاح خدمة عام `sales_returns` محفوظ في `ledger.service_controls`.
+- الأدمن فقط، عبر `identity.users.is_admin = true`، يستطيع قراءة المفتاح أو تغييره.
+- عند الإيقاف:
+  - يُرفض إنشاء أي مرتجع جديد بـ`503 sales_returns_disabled`.
+  - يُرفض اعتماد أي مرتجع معلّق بـ`503 sales_returns_disabled`.
+  - تبقى قراءة المرتجعات المؤرشفة والسجل التاريخي متاحة.
+  - لا تُحذف بيانات ولا تُعدل قيود سابقة.
+- عند إعادة التشغيل يعود المسار طبيعيًا، ويمكن اعتماد المرتجعات التي كانت معلّقة.
+- كل تغيير يُسجل في `ledger.service_control_changes` مع الفاعل والوقت والحالة.
+
+### API
+- `GET /v1/admin/service-controls/sales-returns`
+- `PATCH /v1/admin/service-controls/sales-returns` بالجسم `{ "enabled": false }` أو `{ "enabled": true }`
+- غير الأدمن: `403 forbidden`.
+- أول أدمن يُفعّل صراحة:
+  ```sql
+  UPDATE identity.users SET is_admin=true WHERE id='...';
+  ```
+
+### التنفيذ
+- PR #51: https://github.com/overurdream-collab/test4/pull/51
+- Merge SHA: `70997162985022881386348d73e98edec0bd3c98`.
+- Migration: `015_admin_service_controls.sql`.
+- الفرض على مستوى قاعدة البيانات عبر trigger على `ledger.operations`، وليس على واجهة HTTP فقط.
+- ملف API الجديد: `server/src/admin-api.ts`.
+
+### الاختبارات
+- Unit suite محليًا: 59/59 passed، وtypecheck passed.
+- PostgreSQL test 016 يثبت:
+  - الافتراضي مفعّل.
+  - الأدمن يوقف ويشغّل.
+  - غير الأدمن لا يستطيع التغيير.
+  - إنشاء مرتجع جديد مرفوض أثناء الإيقاف ولا يُحفظ.
+  - اعتماد مرتجع معلّق مرفوض أثناء الإيقاف، وينجح بعد إعادة التشغيل.
+  - سجل تدقيق يحتوي تغييرين.
+- PR CI:
+  - Ledger PostgreSQL tests Run `41649315371`: success.
+    https://github.com/overurdream-collab/test4/actions/runs/41649315371
+  - Server financial lifecycle E2E Run `41649315397`: success — 3/3.
+    https://github.com/overurdream-collab/test4/actions/runs/41649315397
+  - Approval API checks Run `41649315291`: success.
+  - Flutter CI Run `41649315356`: success.
+- بعد الدمج على main:
+  - Ledger Run `41649592115`: success.
+    https://github.com/overurdream-collab/test4/actions/runs/41649592115
+  - E2E Run `41649591705`: success.
+    https://github.com/overurdream-collab/test4/actions/runs/41649591705
+  - Flutter Run `41649592378`: success.
+
+### محاولة فاشلة جرى تصحيحها
+- Run `41649048610` و`41649048781` فشلا لأن `ON CONFLICT (service_key)` في دالة `set_service_control` التبس مع متغير الإخراج.
+- أُصلح إلى `ON CONFLICT ON CONSTRAINT service_controls_pkey` في commit `b50a03b`، ثم نجحت كل الفحوص.
+
+### الحدود
+- لا توجد واجهة أدمن بعد؛ التحكم عبر API فقط.
+- لا توجد إدارة أدمن من داخل التطبيق؛ الترقية الأولى عبر SQL.
+- لا UI ولا نشر ولا قاعدة إنتاجية.
