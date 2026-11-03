@@ -6,7 +6,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test src/*.test.ts",
-    "test:e2e": "node --import tsx --test e2e/*.test.ts"
+    "test:e2e": "node --import tsx --test e2e/*.test.ts",
+    "test:two-device-e2e": "node --import tsx e2e/run-two-device-e2e.ts"
   },
   "engines": {
     "node": ">=22"
