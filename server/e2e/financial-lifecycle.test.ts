@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomInt, randomUUID } from "node:crypto";
 import test from "node:test";
-import { Pool } from "pg";
+import pg from "pg";
 import { buildApprovalApi } from "../src/approval-api.js";
 import { buildIdentityApi, createSessionPrincipalResolver } from "../src/identity-api.js";
 import { buildSyncApi } from "../src/sync-api.js";
@@ -62,7 +62,7 @@ function assertAmount(actual: string, expected: bigint, label: string): void {
 }
 
 test("HTTP financial lifecycle closes with zero balances and a white-page reset", async (t) => {
-  const pool = new Pool({ connectionString: databaseUrl });
+  const pool = new pg.Pool({ connectionString: databaseUrl });
   const otpCodes = new Map<string, string>();
   const resolver = createSessionPrincipalResolver(pool, accessTokenSecret);
   const identity = buildIdentityApi({
