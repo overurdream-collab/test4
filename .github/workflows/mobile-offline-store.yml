@@ -24,7 +24,7 @@ jobs:
         run: flutter pub get
       - name: Format check
         working-directory: mobile
-        run: dart format --output=show lib test
+        run: dart format --output=show lib test test_e2e
       - name: Static analysis
         working-directory: mobile
         run: flutter analyze
