@@ -917,3 +917,51 @@
 - لا توجد واجهة أدمن بعد؛ التحكم عبر API فقط.
 - لا توجد إدارة أدمن من داخل التطبيق؛ الترقية الأولى عبر SQL.
 - لا UI ولا نشر ولا قاعدة إنتاجية.
+
+
+## E2E جهازين/offline عبر HTTP وPostgreSQL / 2026-11-03
+
+### التنفيذ
+- PR #52: https://github.com/overurdream-collab/test4/pull/52
+- Merge SHA: `b876169afa676bd7b669d04a62a63152bf9e56b7`.
+- `server/e2e/run-two-device-e2e.ts` يشغّل Fastify sync/approval حقيقيين على منافذ محلية، ويجهز مستخدمين وعلاقة ودعوة عبر identity API وقاعدة PostgreSQL.
+- `mobile/test_e2e/two_devices_real_server_test.dart` يستخدم `OfflineStore` منفصلين لجهازين، و`HttpSyncTransport` حقيقي، ولا يستخدم خادمًا وهميًا.
+- `.github/workflows/two-device-e2e.yml` يطبق كل migrations ثم يشغّل Flutter E2E مقابل PostgreSQL 16.
+
+### السيناريو المثبت
+1. الجهاز A ينشئ عملية وهو offline إلى منفذ مغلق؛ تفشل المحاولة وتبقى العملية في outbox.
+2. يُغلق store الجهاز A ويُعاد فتحه، وتبقى العملية بنفس `operationId`.
+3. الجهاز B المتصل لا يرى العملية قبل مزامنة A.
+4. بعد إعادة اتصال A: تُقبل العملية، ينتقل state إلى `awaiting_counterparty`، ويصل cursor إلى 1.
+5. إعادة إرسال العملية نفسها مباشرة تعيد `already_processed` دون إنشاء عملية ثانية.
+6. B يسحب الحدث ويرى العملية، ثم يوافق عبر HTTP حقيقي.
+7. A وB يزامنان الحدث الثاني ويصلان إلى `approved` وcursor 2.
+8. يتحقق Node من PostgreSQL: عملية واحدة، حالتها `approved`، وحدثان فقط (`operation.created` و`state_changed`).
+
+### الاختبارات
+- محليًا:
+  - `server`: `tsc --noEmit` passed.
+  - `mobile`: `flutter analyze test_e2e` passed.
+  - تعذر تشغيل E2E محليًا لغياب PostgreSQL/Docker.
+- PR CI:
+  - Two-device offline E2E Run `41652465484`: success.
+    https://github.com/overurdream-collab/test4/actions/runs/41652465484
+  - Server financial lifecycle E2E Run `41652465205`: success.
+  - Ledger PostgreSQL tests Run `41652465095`: success.
+  - Mobile offline store checks Run `41652465399`: success.
+  - Flutter CI Run `41652464872`: success.
+  - Android SQLCipher checks Run `41652465037`: success.
+  - Approval API checks Run `41652465636`: success.
+- بعد الدمج على main:
+  - Two-device offline E2E Run `41653830424`: success.
+    https://github.com/overurdream-collab/test4/actions/runs/41653830424
+  - Ledger Run `41653830302`: success.
+  - E2E Run `41653830285`: success.
+  - Flutter Run `41653830288`: success.
+
+### الحدود
+- «offline» هنا يحاكي انقطاعًا عبر عنوان غير قابل للوصول، وليس فصل شبكة فعليًا.
+- «إعادة تشغيل التطبيق» يحاكيها إغلاق/فتح `OfflineStore` على نفس ملف SQLite، وليس إعادة تشغيل عملية تطبيق كاملة.
+- الاختبار يعمل على Linux مع SQLite FFI، وليس على هاتفين فيزيائيين أو محاكيين Android/iOS.
+- لا UI ولا نشر ولا قاعدة إنتاجية.
+- البوابة التالية إن لزم: اختبار جهاز/محاكي فعلي وسيناريو فقدان رد الشبكة بعد commit الخادم.
