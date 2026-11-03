@@ -32,6 +32,16 @@ Requires Node.js 22 or newer.
 
 Unit tests use a fake principal resolver and fake PostgreSQL pool. Database invariants run separately in the PostgreSQL 16 GitHub Actions workflow.
 
+## Financial lifecycle E2E
+
+`npm run test:e2e` runs the full HTTP path against a real PostgreSQL database: OTP login, relationship invitation, charge, self-approval rejection, counterparty approval, payment, allocation, account-cycle balances for both parties, outsider isolation, and white-page reset. It requires a migrated database:
+
+    DATABASE_URL=postgres://ledger_test:ledger_test@localhost:5432/ledger_test \
+    ACCESS_TOKEN_SECRET=... OTP_PEPPER=... REFRESH_TOKEN_PEPPER=... \
+    npm run test:e2e
+
+The GitHub workflow applies migrations 001–013 before running this suite.
+
 ## Still not implemented
 
 - Mobile client or encrypted SQLite/SQLCipher outbox.

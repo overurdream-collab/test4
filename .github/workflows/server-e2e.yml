@@ -1,0 +1,61 @@
+name: Server financial lifecycle E2E
+
+on:
+  pull_request:
+    paths:
+      - "server/**"
+      - "db/migrations/**"
+      - ".github/workflows/server-e2e.yml"
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  financial-lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ledger_test
+          POSTGRES_PASSWORD: ledger_test
+          POSTGRES_DB: ledger_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ledger_test -d ledger_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply all database migrations
+        env:
+          PGPASSWORD: ledger_test
+        run: |
+          set -euo pipefail
+          for migration in db/migrations/*.sql; do
+            echo "Applying $migration"
+            psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f "$migration"
+          done
+      - name: Install server dependencies
+        working-directory: server
+        run: npm install --no-package-lock --no-audit --no-fund
+      - name: Type check
+        working-directory: server
+        run: npm run typecheck
+      - name: Run full financial lifecycle over HTTP
+        working-directory: server
+        env:
+          DATABASE_URL: postgres://ledger_test:ledger_test@localhost:5432/ledger_test
+          ACCESS_TOKEN_SECRET: ci-access-token-secret-32-bytes-minimum
+          OTP_PEPPER: ci-otp-pepper-secret-32-bytes-minimum
+          REFRESH_TOKEN_PEPPER: ci-refresh-token-secret-32-bytes-minimum
+        run: npm run test:e2e
