@@ -236,3 +236,23 @@ GET /v1/relationships/{relationshipId}/account-cycles يعيد الدورة ال
 - تم دمج POST/GET/PATCH للمرتجعات وفق السلوك الموصوف أعلاه؛ لا migration جديدة، ولا نشر أو تغيير على قاعدة إنتاجية.
 - هذا التحديث **ينسخ ويلغي** حالة «PR #37 ينتظر CI» الواردة في سجل التغيير السابق؛ رقم PR النهائي هو #38.
 - خارج النطاق المتبقي: واجهة المستخدم، تنفيذ رد نقدي فعلي، وتطبيق الرصيد الدائن على مشتريات لاحقة.
+
+
+## 2026-11-03 — عزل محرك التخزين واختبار SQLCipher (الخطوة 6)
+
+- أضيف `OfflineStoreDatabaseOpener` في `mobile/lib/src/offline_store.dart` كحد فتح قابل للاستبدال، مع بقاء SQLCipher الافتراضي في الإنتاج.
+- أصبح اسم مفتاح التخزين الآمن عامًا (`offlineStoreDatabaseKeyName`) ليستخدمه اختبار Android دون نسخ قيمة غير موثقة.
+- لم يتغير مخطط `OfflineStore` ولا منطق outbox/events/cursors.
+- نُقلت اختبارات السلوك إلى `mobile/test/offline_store_contract.dart` لتشغيل العقد نفسه على FFI الآن وعلى SQLCipher أو بديله لاحقًا.
+- أضيف مضيف Android في `mobile/example` واختبار `integration_test/encrypted_store_test.dart` الذي يثبت:
+  - عدم وجود marker نصي في ملفات قاعدة SQLCipher وWAL/SHM/JOURNAL.
+  - أن رأس ملف القاعدة ليس رأس SQLite الصريح.
+  - فشل المفتاح الخاطئ دون حذف/إعادة كتابة الملفات.
+  - نجاح إعادة الفتح بالمفتاح الصحيح واستعادة البيانات.
+  - رفض المفتاح القصير قبل إنشاء القاعدة.
+- نُفذت اختبارات Android في CI عبر `.github/workflows/android-sqlcipher.yml`؛ النتيجة لا تُعلن إلا بعد Run URL.
+- القرار والتدقيق والمخاطر في `docs/SQLCIPHER_DECISION_AUDIT_AR.md`.
+- نتيجة CI: Android SQLCipher checks Run `41548693837` success، 3 اختبارات passed على Emulator API 34 x86_64.
+  https://github.com/overurdream-collab/test4/actions/runs/41548693837
+- Flutter CI Run `41548693931` success، وMobile offline store checks Run `41548693794` success.
+- Run `41548178855` فشل أولًا لأن emulator action ينفذ أسطر script في shells منفصلة؛ أصلح الـ workflow إلى أمر واحد ولم يُضعف الاختبار.

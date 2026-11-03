@@ -1,0 +1,4 @@
+# The Android test host has its own package and analysis options.
+analyzer:
+  exclude:
+    - example/**

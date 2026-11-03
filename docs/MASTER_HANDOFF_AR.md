@@ -975,3 +975,41 @@ PRD 1.1 يطرح:
 - خارج مهمة الأداء: لا تعديل بنيوي أو موارد مدفوعة قبل القياس الأطول.
 - أولويات الحزمة التالية تبقى تقوية refresh-token rotation/reuse detection/logout وربط session principal بتركيب API موحد، دون مزود SMS مدفوع أو نشر قبل الموافقة.
 - هذا التسليم ينسخ حالات «PR #37/PR #36 مفتوح» و«PR #34 لم يدمج» الواردة في الملاحظات التاريخية؛ راجع أرقام الدمج والأدلة أعلاه.
+
+
+---
+
+## تسليم — الخطوة 6 / قرار SQLCipher (2026-11-03)
+
+### الحالة
+- الفرع: `feat/sqlcipher-decision-a`.
+- PR #46: https://github.com/overurdream-collab/test4/pull/46
+- القرار: A — الإبقاء على `sqflite_sqlcipher` 3.4.1 مع تثبيت البصمة، وعدم الانتقال إلى B أو Fork حاليًا.
+- التشفير على Android Emulator **مثبت بنجاح** في Run `41548693837` (3 tests passed).
+
+### الأدلة
+- Android SQLCipher checks Run `41548693837`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41548693837
+- Flutter CI Run `41548693931`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41548693931
+- Mobile offline store checks Run `41548693794`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41548693794
+- Ledger PostgreSQL tests Run `41548693821`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41548693821
+- Commit الكود المختبَر: `e8ea5123de955583ae6696d7b025dc433d05089d`.
+- محاولة سابقة Run `41548178855` فشلت بسبب فصل أسطر script في emulator action؛ أصلحت إلى أمر واحد ونجح التشغيل اللاحق.
+
+### ما نُفذ
+1. تدقيق أرشيف pub.dev ومقارنته بوسم المصدر `v3.4.1` (165 ملفًا مشتركًا، 0 اختلافات جوهرية).
+2. تثبيت `mobile/pubspec.lock` و`mobile/example/pubspec.lock` مع SHA-256 لأرشيف الحزمة.
+3. توثيق سلسلة Android: `net.zetetic:sqlcipher-android:4.10.0` و`androidx.sqlite:sqlite:2.5.2` مع بصماتهما.
+4. عزل فتح القاعدة عبر `OfflineStoreDatabaseOpener` دون إعادة كتابة `OfflineStore`.
+5. Contract Tests قابلة لإعادة الاستخدام في `mobile/test/offline_store_contract.dart`.
+6. مضيف Android في `mobile/example` واختبار تكاملي للتشفير والمفتاح الخاطئ والاستمرارية.
+7. Workflow جديد `Android SQLCipher checks` على Emulator API 34 x86_64.
+8. توثيق القرار والمخاطر ومعايير الخروج في `docs/SQLCIPHER_DECISION_AUDIT_AR.md` وسجل القرارات.
+
+### المتبقي
+- دمج PR #46 والحصول على Merge SHA.
+- تحديث الحالة/Worklog/Handoff بـ Merge SHA النهائي.
+- iOS Keychain وجهاز فيزيائي/StrongBox مؤجلات صراحة.

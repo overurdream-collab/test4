@@ -6,7 +6,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:sqflite_common/sqlite_api.dart';
 import 'package:sqflite_sqlcipher/sqflite.dart' as sqlcipher;
 
-const _databaseKeyName = 'shared_ledger_sqlcipher_key_v1';
+/// Stable secure-storage key name. Changing it requires an explicit migration.
+const offlineStoreDatabaseKeyName = 'shared_ledger_sqlcipher_key_v1';
 const _supportedOperationTypes = {
   'credit_charge',
   'payment',
@@ -80,6 +81,15 @@ class SyncEvent {
   final DateTime createdAt;
 }
 
+/// Opens the database engine used by [OfflineStore].
+///
+/// This seam keeps the store logic reusable when the SQLCipher implementation is
+/// audited or replaced. Production code uses the SQLCipher opener below.
+typedef OfflineStoreDatabaseOpener = Future<Database> Function({
+  required String path,
+  required String password,
+});
+
 class OfflineStore {
   OfflineStore._(this._database);
 
@@ -90,30 +100,39 @@ class OfflineStore {
   static Future<OfflineStore> openEncrypted({
     required String path,
     FlutterSecureStorage? secureStorage,
+    OfflineStoreDatabaseOpener? databaseOpener,
   }) async {
     WidgetsFlutterBinding.ensureInitialized();
     final storage = secureStorage ?? const FlutterSecureStorage();
-    var key = await storage.read(key: _databaseKeyName);
+    var key = await storage.read(key: offlineStoreDatabaseKeyName);
     if (key == null) {
       final random = Random.secure();
       final bytes = List<int>.generate(32, (_) => random.nextInt(256));
       key = base64UrlEncode(bytes);
-      await storage.write(key: _databaseKeyName, value: key);
+      await storage.write(key: offlineStoreDatabaseKeyName, value: key);
     }
     if (key.length < 40) {
       throw StateError('Stored local database key is invalid; refusing to open database.');
     }
 
-    final database = await sqlcipher.openDatabase(
+    final opener = databaseOpener ?? _openSqlCipherDatabase;
+    final database = await opener(path: path, password: key);
+    return OfflineStore._(database);
+  }
+
+  static Future<Database> _openSqlCipherDatabase({
+    required String path,
+    required String password,
+  }) {
+    return sqlcipher.openDatabase(
       path,
-      password: key,
+      password: password,
       version: 1,
       onConfigure: (database) async {
         await database.execute('PRAGMA foreign_keys = ON');
       },
       onCreate: _createSchema,
     );
-    return OfflineStore._(database);
   }
 
   /// Plain SQLite is available only for deterministic unit tests. Production

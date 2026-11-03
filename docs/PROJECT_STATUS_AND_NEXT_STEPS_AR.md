@@ -626,3 +626,48 @@
 - توحيد PrincipalResolver في تركيب إنتاجي واحد مع approval/sync/identity.
 - حل تعارض ترقيم migration مع فرع PR #42 قبل أي دمج له.
 - لا UI ولا نشر ولا قاعدة إنتاجية.
+
+
+## الخطوة 6 — إثبات SQLCipher على Android / 2026-11-03
+
+### الحالة
+- الفرع: `feat/sqlcipher-decision-a`.
+- PR #46: https://github.com/overurdream-collab/test4/pull/46
+- Commit الكود المختبَر: `e8ea5123de955583ae6696d7b025dc433d05089d`.
+- القرار المعتمد: A — الإبقاء على `sqflite_sqlcipher` 3.4.1 مع تثبيت الإصدار والبصمة.
+- **تم إثبات SQLCipher على Android Emulator** بنجاح 3 اختبارات تكاملية.
+
+### نتائج CI
+- Android SQLCipher checks Run `41548693837`: success — 3 اختبارات passed.
+  https://github.com/overurdream-collab/test4/actions/runs/41548693837
+- Flutter CI Run `41548693931`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41548693931
+- Mobile offline store checks Run `41548693794`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41548693794
+- Ledger PostgreSQL tests Run `41548693821`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41548693821
+- Approval API checks لم تُشغّل لأن التغيير لا يمس مسارات الخادم؛ لا يُدّعى نجاحها.
+
+### محاولة فاشلة جرى إصلاحها
+- Run `41548178855` فشل بسبب أن `android-emulator-runner` ينفذ كل سطر في `script` داخل shell منفصل، فلم يستمر `cd mobile/example` إلى سطر `flutter test`.
+- أصلح الـ workflow إلى أمر واحد `cd mobile/example && flutter test ...` في commit `e8ea512`، ثم نجح Run `41548693837`. لم يُخفَ الفشل ولم يُضعف الاختبار.
+
+### المنفَّذ
+- `mobile/pubspec.lock` و`mobile/example/pubspec.lock`: تثبيت الإصدارات وبصمات pub.dev.
+- `mobile/lib/src/offline_store.dart`: اسم مفتاح عام، typedef لعامل فتح القاعدة، وعامل فتح اختياري مع بقاء SQLCipher الافتراضي.
+- `mobile/test/offline_store_contract.dart`: عقد سلوكي قابل لإعادة الاستخدام عند الترحيل.
+- `mobile/example`: مضيف Android مستقل لاختبار SQLCipher الفعلي.
+- `mobile/example/integration_test/encrypted_store_test.dart`: إثبات عدم وجود marker نصي في DB/WAL/SHM/JOURNAL، رأس SQLite غير مشفر، فشل المفتاح الخاطئ دون مسح، إعادة الفتح، ورفض المفتاح القصير.
+- `.github/workflows/android-sqlcipher.yml`: Android Emulator API 34 x86_64، Flutter 3.44.6، Java 17.
+- `docs/SQLCIPHER_DECISION_AUDIT_AR.md`: تدقيق المصدر والاعتماديات والمخاطر.
+- `docs/DECISION_REGISTER_AR.md`: قرار SQLCipher وشرط إعادة التدقيق عند أي ترقية.
+
+### الأدلة المحلية
+- `flutter test`: 9 اختبارات ناجحة، 0 فشل.
+- `flutter analyze` للحزمة وللمضيف: لا مشاكل.
+- محاولة بناء APK محليًا على Windows تعطلت بسبب نفاد مساحة القرص، لكن CI بنى التطبيق وشغّل الاختبارات بنجاح؛ لا يوجد عيب كود معلن.
+
+### المتبقي قبل الإغلاق
+- دمج PR #46 والحصول على Merge SHA.
+- تحديث هذا المستند وWorklog وHandoff بـ Merge SHA بعد الدمج.
+- iOS Keychain وجهاز فيزيائي/StrongBox مؤجلات صراحة خارج نطاق هذه الخطوة.
