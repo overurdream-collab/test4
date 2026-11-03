@@ -63,7 +63,7 @@ BEGIN
   ) VALUES (
     p_service_key, p_enabled, changed_at, p_actor_user_id
   )
-  ON CONFLICT (service_key) DO UPDATE SET
+  ON CONFLICT ON CONSTRAINT service_controls_pkey DO UPDATE SET
     enabled = EXCLUDED.enabled,
     updated_at = EXCLUDED.updated_at,
     updated_by_user_id = EXCLUDED.updated_by_user_id;
