@@ -714,3 +714,57 @@
 - اختبار الدورة المالية الكاملة هو الأولوية التالية.
 - تنفيذ RBAC الدقيق مؤجل حتى حسم نموذج الموظفين والصلاحيات والحد الائتماني.
 - لا UI ولا نشر ولا قاعدة إنتاجية.
+
+
+## اختبار الدورة المالية الكاملة عبر HTTP / 2026-11-03
+
+### الحالة
+- الفرع: `feat/financial-lifecycle-e2e`.
+- PR #48: https://github.com/overurdream-collab/test4/pull/48
+- Merge SHA: `d322238f1b21e10ec04b521b37b89642d839526a`.
+- Commit الاختبار النهائي: `047a700`.
+- التغيير اختبارات وCI فقط؛ لا migration جديدة ولا تغيير في runtime أو DB أو API أو mobile.
+
+### ما يثبته الاختبار
+- تسجيل OTP لثلاثة مستخدمين، ودعوة علاقة تاجر/عميل وقبولها.
+- إنشاء دين 5,000 YER عبر sync API، ورفض اعتماد المنشئ لعمليته (403).
+- اعتماد الطرف المقابل، ثم إعادة إرسال نفس العملية دون إنشاء التزام ثانٍ.
+- إنشاء دفعة 5,000 واعتمادها، والتحقق من فصل الذمم عن الدفعة غير المخصصة.
+- تخصيص كامل واعتماده، ثم صفرية الأربعة حسابات للطرفين.
+- كشف `account-cycles` للطرفين، ورفض مستخدم خارج العلاقة (403).
+- طلب تصفير من البائع، ورفض قرار مقدم الطلب (403)، ثم موافقة المشتري.
+- أرشفة الدورة القديمة، وبدء دورة جديدة صفرية، وبقاء العلاقة نشطة.
+
+### نتائج CI
+- Server financial lifecycle E2E Run `41643263325`: success — 1/1 passed بعد إصلاح الاستيراد.
+  https://github.com/overurdream-collab/test4/actions/runs/41643263325
+- Approval API checks Run `41643263331`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41643263331
+- Ledger PostgreSQL tests Run `41643263347`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41643263347
+- Flutter CI Run `41643263295` (PR) و`41643254656` (push): success.
+  https://github.com/overurdream-collab/test4/actions/runs/41643263295
+  https://github.com/overurdream-collab/test4/actions/runs/41643254656
+- بعد الدمج على main: E2E Run `41643500145` success، Ledger Run `41643499729` success، Flutter Run `41643499803` success.
+  https://github.com/overurdream-collab/test4/actions/runs/41643500145
+  https://github.com/overurdream-collab/test4/actions/runs/41643499729
+  https://github.com/overurdream-collab/test4/actions/runs/41643499803
+
+### محاولة فاشلة جرى إصلاحها
+- Run `41642826950` فشل قبل تشغيل الاختبار بسبب `SyntaxError: The requested module 'pg' does not provide an export named 'Pool'` تحت Node ESM.
+- أُصلح الاستيراد إلى default export في commit `047a700`، ثم نجح Run `41643263325`. لم يُخفَ الفشل ولم يُضعف الاختبار.
+
+### الملفات
+- `server/e2e/financial-lifecycle.test.ts`: الاختبار الكامل عبر Fastify inject مع PostgreSQL حقيقي.
+- `.github/workflows/server-e2e.yml`: PostgreSQL 16، تطبيق migrations 001–013، typecheck، ثم تشغيل E2E.
+- `server/package.json`: `npm run test:e2e`.
+- `server/tsconfig.json` و`server/README.md`: تضمين E2E وتوثيق التشغيل.
+
+### الحدود
+- لا يغطي هذا الاختبار المرتجعات أو العكس العام عبر HTTP؛ يبقيان مغطيين على طبقة DB في 009/010.
+- لا يثبت جهازين فعليين أو انقطاع شبكة حقيقي؛ تلك بوابة لاحقة.
+
+### المتبقي
+- E2E لجهازين/offline وإعادة الاتصال.
+- إدخال المرتجعات والتصحيح العام في مسار HTTP الكامل.
+- لا UI ولا نشر ولا قاعدة إنتاجية.
