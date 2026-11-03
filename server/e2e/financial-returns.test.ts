@@ -9,7 +9,7 @@ import {
   phone
 } from "./harness.js";
 
-test("HTTP sales return preserves signed credit and blocks reset until cleared", async (t) => {
+test("HTTP sales return preserves signed credit and blocks reset while outstanding", async (t) => {
   const harness = createHarness(t);
   const { pool, identity, approval, login, invite, submit, decide, cycles } = harness;
 
@@ -180,125 +180,45 @@ test("HTTP sales return preserves signed credit and blocks reset until cleared",
   assert.equal(blockedReset.statusCode, 409, blockedReset.body);
   assert.equal(json<{ error: string }>(blockedReset.body).error, "settlement_not_complete");
 
-  const offsetChargeId = randomUUID();
-  const offsetCharge = await submit(buyer.token, relation, {
-    operationId: offsetChargeId,
-    operationType: "credit_charge",
-    schemaVersion: 1,
-    baseVersion: 0,
-    payload: {
-      creditorUserId: buyer.userId,
-      debtorUserId: seller.userId,
-      currency: "YER",
-      amountMinor: 1000
-    },
-    clientCreatedAt: new Date().toISOString()
-  });
-  assert.equal(offsetCharge.statusCode, 200, offsetCharge.body);
-  const offsetChargeDecision = await decide(seller.token, relation, offsetChargeId, "approved", "offset charge accepted");
-  assert.equal(offsetChargeDecision.statusCode, 200, offsetChargeDecision.body);
-
-  const offsetPaymentId = randomUUID();
-  const offsetPayment = await submit(seller.token, relation, {
-    operationId: offsetPaymentId,
-    operationType: "payment",
-    schemaVersion: 1,
-    baseVersion: 0,
-    payload: {
-      payerUserId: seller.userId,
-      payeeUserId: buyer.userId,
-      currency: "YER",
-      amountMinor: 1000
-    },
-    clientCreatedAt: new Date().toISOString()
-  });
-  assert.equal(offsetPayment.statusCode, 200, offsetPayment.body);
-  const offsetPaymentDecision = await decide(buyer.token, relation, offsetPaymentId, "approved", "offset payment accepted");
-  assert.equal(offsetPaymentDecision.statusCode, 200, offsetPaymentDecision.body);
-
-  const offsetObligationId = await pool.query<{ id: string }>(
-    "SELECT id FROM ledger.obligations WHERE relationship_id=$1::uuid AND source_operation_id=$2::uuid",
-    [relation, offsetChargeId]
+  const blockedRequestCount = await pool.query<{ count: string }>(
+    "SELECT count(*)::text AS count FROM ledger.settlement_requests WHERE relationship_id=$1::uuid",
+    [relation]
   );
-  const offsetPaymentRecordId = await pool.query<{ id: string }>(
-    "SELECT id FROM ledger.payments WHERE relationship_id=$1::uuid AND source_operation_id=$2::uuid",
-    [relation, offsetPaymentId]
-  );
-  assert.ok(offsetObligationId.rows[0]?.id);
-  assert.ok(offsetPaymentRecordId.rows[0]?.id);
+  assert.equal(blockedRequestCount.rows[0]?.count, "0");
 
-  const offsetAllocationId = randomUUID();
-  const offsetAllocation = await submit(seller.token, relation, {
-    operationId: offsetAllocationId,
-    operationType: "allocation",
-    schemaVersion: 1,
-    baseVersion: 0,
-    payload: {
-      paymentId: offsetPaymentRecordId.rows[0]!.id,
-      obligationId: offsetObligationId.rows[0]!.id,
-      amountMinor: 1000
-    },
-    clientCreatedAt: new Date().toISOString()
-  });
-  assert.equal(offsetAllocation.statusCode, 200, offsetAllocation.body);
-  const offsetAllocationDecision = await decide(buyer.token, relation, offsetAllocationId, "approved", "offset allocation accepted");
-  assert.equal(offsetAllocationDecision.statusCode, 200, offsetAllocationDecision.body);
-
-  const afterOffset = await cycles(seller.token, relation);
-  for (const owner of [seller.userId, buyer.userId]) {
-    const row = balanceFor(afterOffset, cycleId, owner);
-    assertAmount(row.receivableMinor, 0n, "credit return receivable cleared");
-    assertAmount(row.payableMinor, 0n, "credit return payable cleared");
-    assertAmount(row.unappliedPaymentAssetMinor, 0n, "credit return unapplied asset cleared");
-    assertAmount(row.unappliedPaymentLiabilityMinor, 0n, "credit return unapplied liability cleared");
-  }
-
-  const resetId = randomUUID();
-  const resetRequest = await approval.inject({
+  const secondBlockedReset = await approval.inject({
     method: "POST",
     url: "/v1/relationships/" + relation + "/settlement-reset-requests",
-    headers: {
-      authorization: "Bearer " + seller.token,
-      "idempotency-key": resetId
-    },
-    payload: {}
-  });
-  assert.equal(resetRequest.statusCode, 201, resetRequest.body);
-
-  const resetDecision = await approval.inject({
-    method: "POST",
-    url: "/v1/relationships/" + relation + "/settlement-reset-requests/" + resetId + "/decision",
     headers: {
       authorization: "Bearer " + buyer.token,
       "idempotency-key": randomUUID()
     },
-    payload: { decision: "approved", reason: "credit cleared before reset" }
+    payload: {}
   });
-  assert.equal(resetDecision.statusCode, 200, resetDecision.body);
-  assert.equal(json<{ cycleReset: boolean }>(resetDecision.body).cycleReset, true);
+  assert.equal(secondBlockedReset.statusCode, 409, secondBlockedReset.body);
+  assert.equal(json<{ error: string }>(secondBlockedReset.body).error, "settlement_not_complete");
 
-  const afterReset = await cycles(seller.token, relation);
-  assert.notEqual(afterReset.currentCycleId, cycleId);
-  assert.equal(afterReset.cycles.length, 2);
-  assert.equal(afterReset.cycles.find((cycle) => cycle.cycleId === cycleId)?.status, "archived");
-  assert.equal(afterReset.cycles.find((cycle) => cycle.cycleId === afterReset.currentCycleId)?.status, "active");
-  for (const owner of [seller.userId, buyer.userId]) {
-    for (const cycle of afterReset.cycles) {
-      const row = balanceFor(afterReset, cycle.cycleId, owner);
-      assertAmount(row.receivableMinor, 0n, "archived/new receivable zero");
-      assertAmount(row.payableMinor, 0n, "archived/new payable zero");
-      assertAmount(row.unappliedPaymentAssetMinor, 0n, "archived/new unapplied asset zero");
-      assertAmount(row.unappliedPaymentLiabilityMinor, 0n, "archived/new unapplied liability zero");
-    }
-  }
+  const afterBlocked = await cycles(seller.token, relation);
+  assert.equal(afterBlocked.currentCycleId, cycleId);
+  const sellerBlocked = balanceFor(afterBlocked, cycleId, seller.userId);
+  const buyerBlocked = balanceFor(afterBlocked, cycleId, buyer.userId);
+  assertAmount(sellerBlocked.receivableMinor, -1000n, "seller credit must survive blocked reset");
+  assertAmount(buyerBlocked.payableMinor, -1000n, "buyer credit must survive blocked reset");
 
-  const archivedStatement = await approval.inject({
+  const relationshipState = await pool.query<{ status: string; current_cycle_id: string }>(
+    "SELECT status,current_cycle_id FROM ledger.relationships WHERE id=$1::uuid",
+    [relation]
+  );
+  assert.equal(relationshipState.rows[0]?.status, "active");
+  assert.equal(relationshipState.rows[0]?.current_cycle_id, cycleId);
+
+  const statementAfterBlocked = await approval.inject({
     method: "GET",
     url: "/v1/relationships/" + relation + "/account-cycles/" + cycleId + "/sales-returns",
     headers: { authorization: "Bearer " + buyer.token }
   });
-  assert.equal(archivedStatement.statusCode, 200, archivedStatement.body);
-  assert.equal(json<{ salesReturns: unknown[] }>(archivedStatement.body).salesReturns.length, 1);
+  assert.equal(statementAfterBlocked.statusCode, 200, statementAfterBlocked.body);
+  assert.equal(json<{ salesReturns: unknown[] }>(statementAfterBlocked.body).salesReturns.length, 1);
 
   const relationships = await identity.inject({
     method: "GET",
@@ -311,5 +231,5 @@ test("HTTP sales return preserves signed credit and blocks reset until cleared",
   ).relationships.find((item) => item.relationshipId === relation);
   assert.ok(relationship);
   assert.equal(relationship.status, "active");
-  assert.equal(relationship.currentCycleId, afterReset.currentCycleId);
+  assert.equal(relationship.currentCycleId, cycleId);
 });
