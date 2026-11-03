@@ -48,6 +48,7 @@ function statusForDatabaseError(code: string | undefined): number {
     case "23505": return 409;
     case "22023": return 422;
     case "23514": return 409;
+    case "0A000": return 503;
     default: return 500;
   }
 }
@@ -152,7 +153,8 @@ export function buildApprovalApi({
         const errorCode =
           status === 403 ? "forbidden" :
           status === 404 ? "not_found" :
-          status === 409 ? "conflict" : "validation_error";
+          status === 409 ? "conflict" :
+          status === 503 ? "sales_returns_disabled" : "validation_error";
         return reply.code(status).send({ error: errorCode });
       }
     }
@@ -541,6 +543,7 @@ export function buildApprovalApi({
         const code = typeof error === "object" && error !== null && "code" in error
           ? String((error as { code: unknown }).code) : undefined;
         if (code === "23514") return reply.code(409).send({ error: "return_conflict" });
+        if (code === "0A000") return reply.code(503).send({ error: "sales_returns_disabled" });
         const status = statusForDatabaseError(code);
         if (status === 500) {
           request.log.error({ err: error }, "Sales return request failed");

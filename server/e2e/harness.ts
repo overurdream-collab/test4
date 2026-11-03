@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { randomInt, randomUUID } from "node:crypto";
 import type { TestContext } from "node:test";
 import pg from "pg";
+import { buildAdminApi } from "../src/admin-api.js";
 import { buildApprovalApi } from "../src/approval-api.js";
 import { buildIdentityApi, createSessionPrincipalResolver } from "../src/identity-api.js";
 import { buildSyncApi } from "../src/sync-api.js";
@@ -87,9 +88,10 @@ export function createHarness(t: TestContext) {
   });
   const sync = buildSyncApi({ pool, resolvePrincipal: resolver });
   const approval = buildApprovalApi({ pool, resolvePrincipal: resolver });
+  const admin = buildAdminApi({ pool, resolvePrincipal: resolver });
 
   t.after(async () => {
-    await Promise.all([identity.close(), sync.close(), approval.close()]);
+    await Promise.all([identity.close(), sync.close(), approval.close(), admin.close()]);
     await pool.end();
   });
 
@@ -187,5 +189,5 @@ export function createHarness(t: TestContext) {
     return json<CyclesResponse>(response.body);
   }
 
-  return { pool, identity, sync, approval, login, invite, submit, decide, cycles };
+  return { pool, identity, sync, approval, admin, login, invite, submit, decide, cycles };
 }
