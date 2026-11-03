@@ -122,6 +122,16 @@ jobs:
           PGPASSWORD: ledger_test
         run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/tests/010_sales_return_payment_state_matrix_test.sql
 
+      - name: Apply approved-return white-page reset migration
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/migrations/014_allow_return_credit_white_page_reset.sql
+
+      - name: Run approved-return white-page reset tests
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/tests/015_approved_return_white_page_reset_test.sql
+
       - name: Apply identity, phone OTP, devices and sessions migration
         env:
           PGPASSWORD: ledger_test
