@@ -40,7 +40,7 @@ Unit tests use a fake principal resolver and fake PostgreSQL pool. Database inva
     ACCESS_TOKEN_SECRET=... OTP_PEPPER=... REFRESH_TOKEN_PEPPER=... \
     npm run test:e2e
 
-The GitHub workflow applies migrations 001–013 before running this suite.
+The GitHub workflow applies every migration in `db/migrations` before running this suite.
 
 ## Still not implemented
 
