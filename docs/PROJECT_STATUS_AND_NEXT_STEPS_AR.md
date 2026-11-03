@@ -633,19 +633,23 @@
 ### الحالة
 - الفرع: `feat/sqlcipher-decision-a`.
 - PR #46: https://github.com/overurdream-collab/test4/pull/46
-- Commit الكود المختبَر: `e8ea5123de955583ae6696d7b025dc433d05089d`.
+- Merge SHA: `a5421340c63b6217ade526af7eae98755e189e3b`.
+- Commit الكود المختبَر: `e8ea5123de955583ae6696d7b025dc433d05089d`، وآخر head قبل الدمج: `396ea847fa32216426d5b4f035af7345567d81d1`.
 - القرار المعتمد: A — الإبقاء على `sqflite_sqlcipher` 3.4.1 مع تثبيت الإصدار والبصمة.
 - **تم إثبات SQLCipher على Android Emulator** بنجاح 3 اختبارات تكاملية.
 
 ### نتائج CI
-- Android SQLCipher checks Run `41548693837`: success — 3 اختبارات passed.
-  https://github.com/overurdream-collab/test4/actions/runs/41548693837
-- Flutter CI Run `41548693931`: success.
-  https://github.com/overurdream-collab/test4/actions/runs/41548693931
-- Mobile offline store checks Run `41548693794`: success.
-  https://github.com/overurdream-collab/test4/actions/runs/41548693794
-- Ledger PostgreSQL tests Run `41548693821`: success.
-  https://github.com/overurdream-collab/test4/actions/runs/41548693821
+- Android SQLCipher checks Run `41549859547`: success — 3 اختبارات passed على آخر head قبل الدمج.
+  https://github.com/overurdream-collab/test4/actions/runs/41549859547
+- Flutter CI Run `41549859536`: success على آخر head قبل الدمج.
+  https://github.com/overurdream-collab/test4/actions/runs/41549859536
+- Mobile offline store checks Run `41549859538`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41549859538
+- Ledger PostgreSQL tests Run `41549859540`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41549859540
+- بعد الدمج على main: Flutter CI Run `41550635114` success، وLedger PostgreSQL Run `41550635120` success.
+  https://github.com/overurdream-collab/test4/actions/runs/41550635114
+  https://github.com/overurdream-collab/test4/actions/runs/41550635120
 - Approval API checks لم تُشغّل لأن التغيير لا يمس مسارات الخادم؛ لا يُدّعى نجاحها.
 
 ### محاولة فاشلة جرى إصلاحها
@@ -667,7 +671,7 @@
 - `flutter analyze` للحزمة وللمضيف: لا مشاكل.
 - محاولة بناء APK محليًا على Windows تعطلت بسبب نفاد مساحة القرص، لكن CI بنى التطبيق وشغّل الاختبارات بنجاح؛ لا يوجد عيب كود معلن.
 
-### المتبقي قبل الإغلاق
-- دمج PR #46 والحصول على Merge SHA.
-- تحديث هذا المستند وWorklog وHandoff بـ Merge SHA بعد الدمج.
+### الإغلاق
+- تم دمج PR #46 بعد نجاح كل الفحوصات، والتحقق من CI على main.
 - iOS Keychain وجهاز فيزيائي/StrongBox مؤجلات صراحة خارج نطاق هذه الخطوة.
+- الخطوة 6 مغلقة. لا تُنقل أي نتيجة أمنية إلى مرحلة لاحقة دون إعادة اختبار الجهاز عند تغيير محرك التخزين.

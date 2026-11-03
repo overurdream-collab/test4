@@ -984,19 +984,21 @@ PRD 1.1 يطرح:
 ### الحالة
 - الفرع: `feat/sqlcipher-decision-a`.
 - PR #46: https://github.com/overurdream-collab/test4/pull/46
+- Merge SHA: `a5421340c63b6217ade526af7eae98755e189e3b`.
 - القرار: A — الإبقاء على `sqflite_sqlcipher` 3.4.1 مع تثبيت البصمة، وعدم الانتقال إلى B أو Fork حاليًا.
-- التشفير على Android Emulator **مثبت بنجاح** في Run `41548693837` (3 tests passed).
+- التشفير على Android Emulator **مثبت بنجاح** في Run `41549859547` (3 tests passed).
 
 ### الأدلة
-- Android SQLCipher checks Run `41548693837`: success.
-  https://github.com/overurdream-collab/test4/actions/runs/41548693837
-- Flutter CI Run `41548693931`: success.
-  https://github.com/overurdream-collab/test4/actions/runs/41548693931
-- Mobile offline store checks Run `41548693794`: success.
-  https://github.com/overurdream-collab/test4/actions/runs/41548693794
-- Ledger PostgreSQL tests Run `41548693821`: success.
-  https://github.com/overurdream-collab/test4/actions/runs/41548693821
-- Commit الكود المختبَر: `e8ea5123de955583ae6696d7b025dc433d05089d`.
+- Android SQLCipher checks Run `41549859547`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41549859547
+- Flutter CI Run `41549859536`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41549859536
+- Mobile offline store checks Run `41549859538`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41549859538
+- Ledger PostgreSQL tests Run `41549859540`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41549859540
+- بعد الدمج على main: Flutter CI Run `41550635114` success، وLedger PostgreSQL Run `41550635120` success.
+- Commit الكود المختبَر: `e8ea5123de955583ae6696d7b025dc433d05089d`، وآخر head قبل الدمج: `396ea847fa32216426d5b4f035af7345567d81d1`.
 - محاولة سابقة Run `41548178855` فشلت بسبب فصل أسطر script في emulator action؛ أصلحت إلى أمر واحد ونجح التشغيل اللاحق.
 
 ### ما نُفذ
@@ -1009,7 +1011,6 @@ PRD 1.1 يطرح:
 7. Workflow جديد `Android SQLCipher checks` على Emulator API 34 x86_64.
 8. توثيق القرار والمخاطر ومعايير الخروج في `docs/SQLCIPHER_DECISION_AUDIT_AR.md` وسجل القرارات.
 
-### المتبقي
-- دمج PR #46 والحصول على Merge SHA.
-- تحديث الحالة/Worklog/Handoff بـ Merge SHA النهائي.
+### الإغلاق
+- تم الدمج والتحقق من CI على main.
 - iOS Keychain وجهاز فيزيائي/StrongBox مؤجلات صراحة.

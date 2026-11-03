@@ -138,7 +138,7 @@
 | تحليل Dart للحزمة | `flutter analyze` | ناجح محليًا |
 | تحليل مضيف Android | `flutter analyze` في `mobile/example` | ناجح محليًا |
 | بناء APK | `flutter build apk --debug` عبر CI / Android runner | ناجح ضمن اختبار Android؛ المحاولة المحلية تعطلت بنفاد مساحة القرص فقط |
-| اختبار SQLCipher على Android Emulator | GitHub Actions | **ناجح — 3 اختبارات، Run `41548693837`** |
+| اختبار SQLCipher على Android Emulator | GitHub Actions | **ناجح — 3 اختبارات، Run `41549859547`** |
 | Keystore على جهاز فيزيائي/StrongBox | اختبار ميداني | مؤجل |
 | iOS Keychain | لا يوجد هدف iOS في v1 | مؤجل صراحة |
 
@@ -146,24 +146,29 @@
 ## 6.1 نتيجة CI الفعلية
 
 - PR #46: https://github.com/overurdream-collab/test4/pull/46
-- Commit الكود المختبَر: `e8ea5123de955583ae6696d7b025dc433d05089d`.
-- Android SQLCipher checks Run `41548693837`: **success**.
-  - Job: https://github.com/overurdream-collab/test4/actions/runs/41548693837/job/125630531615
+- Merge SHA: `a5421340c63b6217ade526af7eae98755e189e3b`.
+- Commit الكود المختبَر: `e8ea5123de955583ae6696d7b025dc433d05089d`، وآخر head قبل الدمج: `396ea847fa32216426d5b4f035af7345567d81d1`.
+- Android SQLCipher checks Run `41549859547`: **success** على آخر head قبل الدمج.
+  - Job: https://github.com/overurdream-collab/test4/actions/runs/41549859547/job/125634476073
   - النتيجة في السجل: `3 tests passed`.
+  - التشغيل السابق `41548693837` كان ناجحًا أيضًا على commit الكود `e8ea512`.
   - الاختبارات: التشفير وإعادة الفتح، المفتاح الخاطئ وعدم مسح البيانات، رفض المفتاح القصير.
-- Flutter CI Run `41548693931`: success.
-  https://github.com/overurdream-collab/test4/actions/runs/41548693931
-- Mobile offline store checks Run `41548693794`: success.
-  https://github.com/overurdream-collab/test4/actions/runs/41548693794
-- Ledger PostgreSQL tests Run `41548693821`: success.
-  https://github.com/overurdream-collab/test4/actions/runs/41548693821
+- Flutter CI Run `41549859536`: success على آخر head قبل الدمج.
+  https://github.com/overurdream-collab/test4/actions/runs/41549859536
+- Mobile offline store checks Run `41549859538`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41549859538
+- Ledger PostgreSQL tests Run `41549859540`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41549859540
+- بعد الدمج على main: Flutter CI Run `41550635114` success، وLedger PostgreSQL Run `41550635120` success.
+  https://github.com/overurdream-collab/test4/actions/runs/41550635114
+  https://github.com/overurdream-collab/test4/actions/runs/41550635120
 
 ### محاولة فاشلة جرى إصلاحها
 
 - Run `41548178855` فشل في خطوة الاختبار، وليس في التشفير.
 - السبب: `reactivecircus/android-emulator-runner` ينفذ كل سطر من `script` في shell منفصل، لذلك لم يستمر `cd mobile/example` إلى سطر `flutter test`.
 - الإصلاح: تحويل الخطوتين إلى أمر واحد `cd mobile/example && flutter test ...` في commit `e8ea512`.
-- النتيجة: Run `41548693837` ناجح، 3 اختبارات passed.
+- النتيجة: Run `41548693837` ناجح، 3 اختبارات passed، وتكرر النجاح على آخر head في Run `41549859547`.
 - لم يُخفَ الفشل ولم يُعدل الاختبار ليمر.
 
 ## 7. مطابقة الضوابط التسعة للقرار A
@@ -194,14 +199,14 @@
 
 ## 9. معايير الخروج من الخطوة 6
 
-لا تُغلق الخطوة إلا بعد:
+تم استيفاء المعايير التالية:
 
-1. نجاح `Android SQLCipher checks` في GitHub Actions مع Run URL.
-2. نجاح `Flutter CI` و`Mobile offline store checks` على PR نفسه.
-3. نجاح اختبارات العقد والتحليل.
-4. دمج PR والحصول على Merge SHA.
-5. تحديث `PROJECT_STATUS_AND_NEXT_STEPS_AR.md` بالـ SHA وRun URLs.
-6. عدم وجود فشل مخفي أو اختبار معطّل لتجاوز مشكلة.
+1. نجاح `Android SQLCipher checks` مع Run URL `41549859547` و`3 tests passed`.
+2. نجاح `Flutter CI` Run `41549859536` و`Mobile offline store checks` Run `41549859538`.
+3. نجاح اختبارات العقد والتحليل محليًا وفي CI.
+4. دمج PR #46 بـ Merge SHA `a5421340c63b6217ade526af7eae98755e189e3b`.
+5. تحديث الحالة وWorklog وHandoff بالـ SHA وRun URLs.
+6. الإفصاح عن المحاولة الفاشلة `41548178855` وإصلاحها دون تعطيل الاختبار.
 
 ## 10. البديل B — ملخص الترحيل
 
