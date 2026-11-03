@@ -262,3 +262,121 @@ test("HTTP sales return credit is archived by bilateral white-page reset", async
   assert.equal(relationship.status, "active");
   assert.equal(relationship.currentCycleId, afterReset.currentCycleId);
 });
+
+test("admin can disable sales returns globally at any time", async (t) => {
+  const harness = createHarness(t);
+  const { pool, approval, admin, login, invite, submit, decide } = harness;
+
+  const operator = await login(phone());
+  const buyer = await login(phone());
+  await pool.query("UPDATE identity.users SET is_admin=true WHERE id=$1::uuid", [operator.userId]);
+
+  try {
+    const initial = await admin.inject({
+      method: "GET",
+      url: "/v1/admin/service-controls/sales-returns",
+      headers: { authorization: "Bearer " + operator.token }
+    });
+    assert.equal(initial.statusCode, 200, initial.body);
+    assert.equal(json<{ enabled: boolean }>(initial.body).enabled, true);
+
+    const denied = await admin.inject({
+      method: "PATCH",
+      url: "/v1/admin/service-controls/sales-returns",
+      headers: { authorization: "Bearer " + buyer.token },
+      payload: { enabled: false }
+    });
+    assert.equal(denied.statusCode, 403, denied.body);
+
+    const relation = await invite(operator, buyer);
+    const chargeId = randomUUID();
+    const charge = await submit(operator.token, relation, {
+      operationId: chargeId,
+      operationType: "credit_charge",
+      schemaVersion: 1,
+      baseVersion: 0,
+      payload: {
+        creditorUserId: operator.userId,
+        debtorUserId: buyer.userId,
+        currency: "YER",
+        amountMinor: 5000
+      },
+      clientCreatedAt: new Date().toISOString()
+    });
+    assert.equal(charge.statusCode, 200, charge.body);
+    const chargeDecision = await decide(buyer.token, relation, chargeId, "approved", "charge accepted");
+    assert.equal(chargeDecision.statusCode, 200, chargeDecision.body);
+
+    const obligation = await pool.query<{ id: string }>(
+      "SELECT id FROM ledger.obligations WHERE relationship_id=$1::uuid AND source_operation_id=$2::uuid",
+      [relation, chargeId]
+    );
+    assert.ok(obligation.rows[0]?.id);
+
+    const pendingReturnId = randomUUID();
+    const pendingReturn = await approval.inject({
+      method: "POST",
+      url: "/v1/relationships/" + relation + "/sales-returns",
+      headers: {
+        authorization: "Bearer " + buyer.token,
+        "idempotency-key": pendingReturnId
+      },
+      payload: {
+        originalObligationId: obligation.rows[0]!.id,
+        currency: "YER",
+        amountMinor: "1000",
+        reason: "Created before the global switch"
+      }
+    });
+    assert.equal(pendingReturn.statusCode, 201, pendingReturn.body);
+
+    const disabled = await admin.inject({
+      method: "PATCH",
+      url: "/v1/admin/service-controls/sales-returns",
+      headers: { authorization: "Bearer " + operator.token },
+      payload: { enabled: false }
+    });
+    assert.equal(disabled.statusCode, 200, disabled.body);
+    assert.equal(json<{ enabled: boolean }>(disabled.body).enabled, false);
+
+    const newReturn = await approval.inject({
+      method: "POST",
+      url: "/v1/relationships/" + relation + "/sales-returns",
+      headers: {
+        authorization: "Bearer " + buyer.token,
+        "idempotency-key": randomUUID()
+      },
+      payload: {
+        originalObligationId: obligation.rows[0]!.id,
+        currency: "YER",
+        amountMinor: "1000",
+        reason: "Must be blocked globally"
+      }
+    });
+    assert.equal(newReturn.statusCode, 503, newReturn.body);
+    assert.equal(json<{ error: string }>(newReturn.body).error, "sales_returns_disabled");
+
+    const blockedDecision = await decide(operator.token, relation, pendingReturnId, "approved", "blocked by switch");
+    assert.equal(blockedDecision.statusCode, 503, blockedDecision.body);
+    assert.equal(json<{ error: string }>(blockedDecision.body).error, "sales_returns_disabled");
+
+    const enabled = await admin.inject({
+      method: "PATCH",
+      url: "/v1/admin/service-controls/sales-returns",
+      headers: { authorization: "Bearer " + operator.token },
+      payload: { enabled: true }
+    });
+    assert.equal(enabled.statusCode, 200, enabled.body);
+    assert.equal(json<{ enabled: boolean }>(enabled.body).enabled, true);
+
+    const approved = await decide(operator.token, relation, pendingReturnId, "approved", "approved after re-enable");
+    assert.equal(approved.statusCode, 200, approved.body);
+  } finally {
+    await admin.inject({
+      method: "PATCH",
+      url: "/v1/admin/service-controls/sales-returns",
+      headers: { authorization: "Bearer " + operator.token },
+      payload: { enabled: true }
+    });
+  }
+});

@@ -7,6 +7,14 @@ This folder contains the first TypeScript/Fastify HTTP boundaries for the shared
 - POST /v1/relationships/:relationshipId/operations/:operationId/decision
 - Uses the PostgreSQL decision function for membership/permission checks, optimistic versioning, and idempotent decisions.
 
+## Admin service controls
+
+- GET /v1/admin/service-controls/sales-returns returns the global sales-return switch.
+- PATCH /v1/admin/service-controls/sales-returns with `{ "enabled": false }` disables new returns and approval of pending returns for every user.
+- Only active users with `identity.users.is_admin = true` may read or change the switch.
+- Disabling does not delete history or block reading archived return statements.
+- Bootstrap the first admin explicitly, for example: `UPDATE identity.users SET is_admin=true WHERE id='...';`
+
 ## Offline sync API (server side)
 
 - POST /v1/relationships/:relationshipId/operations accepts a durable operation envelope.
@@ -34,7 +42,7 @@ Unit tests use a fake principal resolver and fake PostgreSQL pool. Database inva
 
 ## Financial lifecycle E2E
 
-`npm run test:e2e` runs the full HTTP path against a real PostgreSQL database: OTP login, relationship invitation, charge, self-approval rejection, counterparty approval, payment, allocation, account-cycle balances for both parties, outsider isolation, white-page reset, and a sales-return scenario with signed credit, over-return/immutability rejection, bilateral reset with approved return credit, and durable archived statements. It requires a migrated database:
+`npm run test:e2e` runs the full HTTP path against a real PostgreSQL database: OTP login, relationship invitation, charge, self-approval rejection, counterparty approval, payment, allocation, account-cycle balances for both parties, outsider isolation, white-page reset, and a sales-return scenario with signed credit, over-return/immutability rejection, bilateral reset with approved return credit, durable archived statements, and the global admin sales-return switch. It requires a migrated database:
 
     DATABASE_URL=postgres://ledger_test:ledger_test@localhost:5432/ledger_test \
     ACCESS_TOKEN_SECRET=... OTP_PEPPER=... REFRESH_TOKEN_PEPPER=... \
