@@ -768,3 +768,49 @@
 - E2E لجهازين/offline وإعادة الاتصال.
 - إدخال المرتجعات والتصحيح العام في مسار HTTP الكامل.
 - لا UI ولا نشر ولا قاعدة إنتاجية.
+
+
+## اختبار المرتجعات والرصيد الدائن عبر HTTP / 2026-11-03
+
+### الحالة
+- الفرع: `feat/http-sales-return-e2e`.
+- PR #49: https://github.com/overurdream-collab/test4/pull/49
+- Merge SHA: `9d41f1c3a4b25714c6c096580a47ecb6c4bfc56f`.
+- Commit الاختبار النهائي: `ecb2821`.
+- التغيير اختبارات وREADME فقط؛ لا migration جديدة ولا تغيير runtime أو DB أو API أو mobile.
+
+### ما يثبته الاختبار
+- مرتجع جزئي 1,000 YER بعد دين 5,000 ودفعة وتخصيص كاملين.
+- `receivableMinor` للبائع و`payableMinor` للمشتري يصبحان `-1000` دون قص الإشارة.
+- إعادة إرسال طلب المرتجع نفسه بنفس المعرف لا تنشئ سجلًا ثانيًا.
+- مرتجع يتجاوز أصل الالتزام يُرفض بـ409، وتعديل مرتجع منشور يُرفض بـ409.
+- كشف المرتجعات يعيد السجل للطرفين مع القرار والسبب.
+- طلب التصفير يُرفض بـ409 ما دام الرصيد الدائن قائمًا، ولا يُنشأ طلب تصفير ولا تتغير العلاقة أو الدورة.
+- كشف المرتجع يبقى متاحًا بعد محاولة التصفير الفاشلة.
+
+### نتائج CI
+- Server financial lifecycle E2E Run `41645248828`: success — 2/2 passed.
+  https://github.com/overurdream-collab/test4/actions/runs/41645248828
+- Approval API checks Run `41645248815`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41645248815
+- Ledger PostgreSQL tests Run `41645248780`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41645248780
+- Flutter CI Run `41645248771` (PR) و`41645240054` (push): success.
+  https://github.com/overurdream-collab/test4/actions/runs/41645248771
+  https://github.com/overurdream-collab/test4/actions/runs/41645240054
+- بعد الدمج على main: E2E Run `41645498407` success، Ledger Run `41645498615` success، Flutter Run `41645498421` success.
+  https://github.com/overurdream-collab/test4/actions/runs/41645498407
+  https://github.com/overurdream-collab/test4/actions/runs/41645498615
+  https://github.com/overurdream-collab/test4/actions/runs/41645498421
+
+### محاولة فاشلة جرى تصحيحها
+- المحاولة الأولى Run `41644731599` افترضت أن إنشاء دين معاكس ودفعة وتخصيص يصفّر رصيد المرتجع. الاختبار أثبت أن ذلك يعيد الرصيد الدائن ولا يستهلكه، ففشل عند `-1000n !== 0n`.
+- عُدّل الاختبار ليعكس السلوك الحقيقي: الرصيد الدائن يمنع التصفير حتى تُنفذ عملية رد/استخدام صريحة. Commit `ecb2821`، ثم نجح Run `41645248828`. لم يُخفَ الفشل ولم يُضعف الفحص.
+
+### الفجوة المؤكدة
+- لا توجد حاليًا عملية `refund` أو `credit application` تستهلك رصيد المرتجع الدائن وتسمح بالتصفير. هذا قرار/تنفيذ مالي لاحق، وليس عيبًا في اختبار الواجهة.
+
+### المتبقي
+- تصميم وتنفيذ عملية رد النقد أو تطبيق الرصيد الدائن كتسوية صريحة، مع اختبار E2E.
+- E2E لجهازين/offline وإعادة الاتصال.
+- لا UI ولا نشر ولا قاعدة إنتاجية.
