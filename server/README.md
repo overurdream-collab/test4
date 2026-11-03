@@ -34,7 +34,7 @@ Unit tests use a fake principal resolver and fake PostgreSQL pool. Database inva
 
 ## Financial lifecycle E2E
 
-`npm run test:e2e` runs the full HTTP path against a real PostgreSQL database: OTP login, relationship invitation, charge, self-approval rejection, counterparty approval, payment, allocation, account-cycle balances for both parties, outsider isolation, and white-page reset. It requires a migrated database:
+`npm run test:e2e` runs the full HTTP path against a real PostgreSQL database: OTP login, relationship invitation, charge, self-approval rejection, counterparty approval, payment, allocation, account-cycle balances for both parties, outsider isolation, white-page reset, and a sales-return scenario with signed credit, over-return/immutability rejection, reset blocking, and durable return statements. It requires a migrated database:
 
     DATABASE_URL=postgres://ledger_test:ledger_test@localhost:5432/ledger_test \
     ACCESS_TOKEN_SECRET=... OTP_PEPPER=... REFRESH_TOKEN_PEPPER=... \
