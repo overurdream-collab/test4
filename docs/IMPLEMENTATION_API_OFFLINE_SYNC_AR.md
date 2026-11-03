@@ -252,3 +252,7 @@ GET /v1/relationships/{relationshipId}/account-cycles يعيد الدورة ال
   - رفض المفتاح القصير قبل إنشاء القاعدة.
 - نُفذت اختبارات Android في CI عبر `.github/workflows/android-sqlcipher.yml`؛ النتيجة لا تُعلن إلا بعد Run URL.
 - القرار والتدقيق والمخاطر في `docs/SQLCIPHER_DECISION_AUDIT_AR.md`.
+- نتيجة CI: Android SQLCipher checks Run `41548693837` success، 3 اختبارات passed على Emulator API 34 x86_64.
+  https://github.com/overurdream-collab/test4/actions/runs/41548693837
+- Flutter CI Run `41548693931` success، وMobile offline store checks Run `41548693794` success.
+- Run `41548178855` فشل أولًا لأن emulator action ينفذ أسطر script في shells منفصلة؛ أصلح الـ workflow إلى أمر واحد ولم يُضعف الاختبار.

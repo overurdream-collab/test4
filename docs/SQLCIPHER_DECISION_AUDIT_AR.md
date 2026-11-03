@@ -137,10 +137,34 @@
 | اختبارات العقد على FFI | `flutter test` | ناجح محليًا |
 | تحليل Dart للحزمة | `flutter analyze` | ناجح محليًا |
 | تحليل مضيف Android | `flutter analyze` في `mobile/example` | ناجح محليًا |
-| بناء APK محلي | `flutter build apk --debug` | لم يكتمل بسبب نفاد مساحة القرص على بيئة Windows المحلية، وليس بسبب خطأ كود |
-| اختبار SQLCipher على Android Emulator | GitHub Actions | **Pending — لا يُعلن PASS قبل Run URL** |
+| بناء APK | `flutter build apk --debug` عبر CI / Android runner | ناجح ضمن اختبار Android؛ المحاولة المحلية تعطلت بنفاد مساحة القرص فقط |
+| اختبار SQLCipher على Android Emulator | GitHub Actions | **ناجح — 3 اختبارات، Run `41548693837`** |
 | Keystore على جهاز فيزيائي/StrongBox | اختبار ميداني | مؤجل |
 | iOS Keychain | لا يوجد هدف iOS في v1 | مؤجل صراحة |
+
+
+## 6.1 نتيجة CI الفعلية
+
+- PR #46: https://github.com/overurdream-collab/test4/pull/46
+- Commit الكود المختبَر: `e8ea5123de955583ae6696d7b025dc433d05089d`.
+- Android SQLCipher checks Run `41548693837`: **success**.
+  - Job: https://github.com/overurdream-collab/test4/actions/runs/41548693837/job/125630531615
+  - النتيجة في السجل: `3 tests passed`.
+  - الاختبارات: التشفير وإعادة الفتح، المفتاح الخاطئ وعدم مسح البيانات، رفض المفتاح القصير.
+- Flutter CI Run `41548693931`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41548693931
+- Mobile offline store checks Run `41548693794`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41548693794
+- Ledger PostgreSQL tests Run `41548693821`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41548693821
+
+### محاولة فاشلة جرى إصلاحها
+
+- Run `41548178855` فشل في خطوة الاختبار، وليس في التشفير.
+- السبب: `reactivecircus/android-emulator-runner` ينفذ كل سطر من `script` في shell منفصل، لذلك لم يستمر `cd mobile/example` إلى سطر `flutter test`.
+- الإصلاح: تحويل الخطوتين إلى أمر واحد `cd mobile/example && flutter test ...` في commit `e8ea512`.
+- النتيجة: Run `41548693837` ناجح، 3 اختبارات passed.
+- لم يُخفَ الفشل ولم يُعدل الاختبار ليمر.
 
 ## 7. مطابقة الضوابط التسعة للقرار A
 

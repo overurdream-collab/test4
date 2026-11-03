@@ -628,32 +628,46 @@
 - لا UI ولا نشر ولا قاعدة إنتاجية.
 
 
-## الخطوة 6 — إثبات SQLCipher على Android (فرع محلي)
+## الخطوة 6 — إثبات SQLCipher على Android / 2026-11-03
 
 ### الحالة
 - الفرع: `feat/sqlcipher-decision-a`.
+- PR #46: https://github.com/overurdream-collab/test4/pull/46
+- Commit الكود المختبَر: `e8ea5123de955583ae6696d7b025dc433d05089d`.
 - القرار المعتمد: A — الإبقاء على `sqflite_sqlcipher` 3.4.1 مع تثبيت الإصدار والبصمة.
-- لم يُدفع الفرع بعد في هذه اللحظة، ولم يُشغّل Android CI؛ لا يوجد Run URL ولا ادعاء PASS للتشفير على Android.
+- **تم إثبات SQLCipher على Android Emulator** بنجاح 3 اختبارات تكاملية.
+
+### نتائج CI
+- Android SQLCipher checks Run `41548693837`: success — 3 اختبارات passed.
+  https://github.com/overurdream-collab/test4/actions/runs/41548693837
+- Flutter CI Run `41548693931`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41548693931
+- Mobile offline store checks Run `41548693794`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41548693794
+- Ledger PostgreSQL tests Run `41548693821`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41548693821
+- Approval API checks لم تُشغّل لأن التغيير لا يمس مسارات الخادم؛ لا يُدّعى نجاحها.
+
+### محاولة فاشلة جرى إصلاحها
+- Run `41548178855` فشل بسبب أن `android-emulator-runner` ينفذ كل سطر في `script` داخل shell منفصل، فلم يستمر `cd mobile/example` إلى سطر `flutter test`.
+- أصلح الـ workflow إلى أمر واحد `cd mobile/example && flutter test ...` في commit `e8ea512`، ثم نجح Run `41548693837`. لم يُخفَ الفشل ولم يُضعف الاختبار.
 
 ### المنفَّذ
 - `mobile/pubspec.lock` و`mobile/example/pubspec.lock`: تثبيت الإصدارات وبصمات pub.dev.
-- `mobile/lib/src/offline_store.dart`: اسم مفتاح عام قابل للاختبار، typedef لعامل فتح القاعدة، وعامل فتح اختياري مع بقاء SQLCipher هو الافتراضي.
+- `mobile/lib/src/offline_store.dart`: اسم مفتاح عام، typedef لعامل فتح القاعدة، وعامل فتح اختياري مع بقاء SQLCipher الافتراضي.
 - `mobile/test/offline_store_contract.dart`: عقد سلوكي قابل لإعادة الاستخدام عند الترحيل.
-- `mobile/test/offline_store_test.dart`: يشغّل العقد على FFI للاختبارات السريعة.
 - `mobile/example`: مضيف Android مستقل لاختبار SQLCipher الفعلي.
-- `mobile/example/integration_test/encrypted_store_test.dart`: فحص عدم وجود marker نصي في DB/WAL/SHM/JOURNAL، رأس SQLite غير مشفر، المفتاح الخاطئ، إعادة الفتح، والمفتاح القصير.
-- `.github/workflows/android-sqlcipher.yml`: Android Emulator API 34 x86_64 مع Flutter 3.44.6 وJava 17.
-- `docs/SQLCIPHER_DECISION_AUDIT_AR.md`: تدقيق المصدر والاعتماديات والمخاطر ومعايير الخروج.
-- `docs/DECISION_REGISTER_AR.md`: إضافة قرار SQLCipher وشرط إعادة التدقيق عند أي ترقية.
+- `mobile/example/integration_test/encrypted_store_test.dart`: إثبات عدم وجود marker نصي في DB/WAL/SHM/JOURNAL، رأس SQLite غير مشفر، فشل المفتاح الخاطئ دون مسح، إعادة الفتح، ورفض المفتاح القصير.
+- `.github/workflows/android-sqlcipher.yml`: Android Emulator API 34 x86_64، Flutter 3.44.6، Java 17.
+- `docs/SQLCIPHER_DECISION_AUDIT_AR.md`: تدقيق المصدر والاعتماديات والمخاطر.
+- `docs/DECISION_REGISTER_AR.md`: قرار SQLCipher وشرط إعادة التدقيق عند أي ترقية.
 
 ### الأدلة المحلية
-- `flutter test`: 9 اختبارات ناجحة، 0 فشل (بعد إضافة العقد).
-- `flutter analyze` للحزمة: لا مشاكل.
-- `flutter analyze` لمضيف Android: لا مشاكل.
-- محاولة `flutter build apk --debug` محليًا على Windows لم تكتمل بسبب نفاد مساحة القرص (`There is not enough space on the disk`)، وليس بسبب خطأ كود. البناء سيتحقق في CI.
+- `flutter test`: 9 اختبارات ناجحة، 0 فشل.
+- `flutter analyze` للحزمة وللمضيف: لا مشاكل.
+- محاولة بناء APK محليًا على Windows تعطلت بسبب نفاد مساحة القرص، لكن CI بنى التطبيق وشغّل الاختبارات بنجاح؛ لا يوجد عيب كود معلن.
 
 ### المتبقي قبل الإغلاق
-- push وPR وتشغيل `Android SQLCipher checks` و`Flutter CI` و`Mobile offline store checks`.
-- الحصول على Run URLs وSHA مدموج.
-- نجاح اختبار Android الفعلي؛ بدونه لا يُعد التشفير مثبتًا على الجهاز.
-- تحديث هذا المستند وWorklog وHandoff بعد الدمج.
+- دمج PR #46 والحصول على Merge SHA.
+- تحديث هذا المستند وWorklog وHandoff بـ Merge SHA بعد الدمج.
+- iOS Keychain وجهاز فيزيائي/StrongBox مؤجلات صراحة خارج نطاق هذه الخطوة.

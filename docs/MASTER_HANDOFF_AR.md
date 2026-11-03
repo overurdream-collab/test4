@@ -983,8 +983,21 @@ PRD 1.1 يطرح:
 
 ### الحالة
 - الفرع: `feat/sqlcipher-decision-a`.
+- PR #46: https://github.com/overurdream-collab/test4/pull/46
 - القرار: A — الإبقاء على `sqflite_sqlcipher` 3.4.1 مع تثبيت البصمة، وعدم الانتقال إلى B أو Fork حاليًا.
-- لا يُعلن نجاح التشفير على Android قبل تشغيل `Android SQLCipher checks` والحصول على Run URL.
+- التشفير على Android Emulator **مثبت بنجاح** في Run `41548693837` (3 tests passed).
+
+### الأدلة
+- Android SQLCipher checks Run `41548693837`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41548693837
+- Flutter CI Run `41548693931`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41548693931
+- Mobile offline store checks Run `41548693794`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41548693794
+- Ledger PostgreSQL tests Run `41548693821`: success.
+  https://github.com/overurdream-collab/test4/actions/runs/41548693821
+- Commit الكود المختبَر: `e8ea5123de955583ae6696d7b025dc433d05089d`.
+- محاولة سابقة Run `41548178855` فشلت بسبب فصل أسطر script في emulator action؛ أصلحت إلى أمر واحد ونجح التشغيل اللاحق.
 
 ### ما نُفذ
 1. تدقيق أرشيف pub.dev ومقارنته بوسم المصدر `v3.4.1` (165 ملفًا مشتركًا، 0 اختلافات جوهرية).
@@ -996,13 +1009,7 @@ PRD 1.1 يطرح:
 7. Workflow جديد `Android SQLCipher checks` على Emulator API 34 x86_64.
 8. توثيق القرار والمخاطر ومعايير الخروج في `docs/SQLCIPHER_DECISION_AUDIT_AR.md` وسجل القرارات.
 
-### الأدلة المحلية
-- `flutter test`: 9 ناجحة، 0 فشل.
-- `flutter analyze` للحزمة والمضيف: لا مشاكل.
-- بناء APK محلي لم يكتمل بسبب نفاد مساحة القرص على بيئة Windows، وليس بسبب فشل كود؛ البناء سيتحقق في CI.
-
 ### المتبقي
-- push وPR وتشغيل CI.
-- Android Emulator Run URL ونتيجة فعلية.
-- Merge SHA وتحديث الحالة/Worklog.
-- اختبار جهاز فيزيائي أو StrongBox وiOS Keychain مؤجلات صراحة.
+- دمج PR #46 والحصول على Merge SHA.
+- تحديث الحالة/Worklog/Handoff بـ Merge SHA النهائي.
+- iOS Keychain وجهاز فيزيائي/StrongBox مؤجلات صراحة.
