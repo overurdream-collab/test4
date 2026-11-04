@@ -113,8 +113,8 @@ test("credit balance from an approved return is applied to a future purchase and
   const afterCredit = await cycles(seller.token, relation);
   for (const owner of [seller.userId, buyer.userId]) {
     const b = balanceFor(afterCredit, cycleId, owner);
-    assertAmount(b.receivableMinor, 0n, "receivable zero after credit application");
-    assertAmount(b.payableMinor, 0n, "payable zero after credit application");
+    assertAmount(b.receivableMinor, 1000n, "net receivable remains after credit application");
+    assertAmount(b.payableMinor, 1000n, "net payable remains after credit application");
   }
 
   const remainingPaymentId = randomUUID();

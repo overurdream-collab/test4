@@ -102,37 +102,6 @@ CREATE TRIGGER refunds_post_to_journal
 AFTER INSERT ON ledger.refunds
 FOR EACH ROW EXECUTE FUNCTION ledger.post_refund_to_journal();
 
-CREATE OR REPLACE FUNCTION ledger.post_credit_application_to_journal()
-RETURNS trigger LANGUAGE plpgsql AS $$
-DECLARE
-  obl ledger.obligations%ROWTYPE;
-  debtor_payable uuid;
-  creditor_receivable uuid;
-  journal_id uuid;
-BEGIN
-  SELECT * INTO obl FROM ledger.obligations
-  WHERE id = NEW.target_obligation_id AND relationship_id = NEW.relationship_id AND currency = NEW.currency;
-
-  debtor_payable := ledger.get_or_create_account(NEW.relationship_id, obl.debtor_user_id, 'party_payable', NEW.currency);
-  creditor_receivable := ledger.get_or_create_account(NEW.relationship_id, obl.creditor_user_id, 'party_receivable', NEW.currency);
-
-  journal_id := gen_random_uuid();
-  INSERT INTO ledger.journal_transactions
-    (id, relationship_id, source_operation_id, currency, description)
-  VALUES
-    (journal_id, NEW.relationship_id, NEW.source_operation_id, NEW.currency, 'Credit balance applied to obligation');
-
-  INSERT INTO ledger.journal_entries
-    (id, journal_transaction_id, relationship_id, currency, account_id, debit_minor, credit_minor)
-  VALUES
-    (gen_random_uuid(), journal_id, NEW.relationship_id, NEW.currency, debtor_payable, NEW.amount_minor, 0),
-    (gen_random_uuid(), journal_id, NEW.relationship_id, NEW.currency, creditor_receivable, 0, NEW.amount_minor);
-  RETURN NEW;
-END; $$;
-CREATE TRIGGER credit_applications_post_to_journal
-AFTER INSERT ON ledger.credit_applications
-FOR EACH ROW EXECUTE FUNCTION ledger.post_credit_application_to_journal();
-
 CREATE OR REPLACE FUNCTION ledger.apply_credit_application_to_obligation()
 RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
