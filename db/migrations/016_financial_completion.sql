@@ -126,7 +126,7 @@ BEGIN
   journal_id := gen_random_uuid();
   INSERT INTO ledger.journal_transactions
     (id, relationship_id, source_operation_id, currency, description)
-  SELECT gen_random_uuid(), NEW.relationship_id, NEW.source_operation_id, NEW.currency,
+  SELECT journal_id, NEW.relationship_id, NEW.source_operation_id, NEW.currency,
          'Reversal of operation ' || NEW.original_operation_id::text
   FROM ledger.operations
   WHERE operation_id = NEW.original_operation_id AND relationship_id = NEW.relationship_id
@@ -623,7 +623,7 @@ BEGIN
     RAISE EXCEPTION 'A settlement reset request is already awaiting a decision' USING ERRCODE = '55000';
   END IF;
 
-  SELECT COALESCE(sum(o.amount_minor - COALESCE(a.allocated, 0) - COALESCE(o.credit_applied_minor, 0)), 0)
+  SELECT COALESCE(sum(o.amount_minor - COALESCE(a.allocated, 0) - COALESCE(o.credit_applied_minor, 0) - COALESCE(rv.reversed_minor, 0)), 0)
   INTO outstanding_obligations
   FROM ledger.obligations o
   JOIN ledger.operations op ON op.operation_id = o.source_operation_id
@@ -632,6 +632,13 @@ BEGIN
     FROM ledger.allocations WHERE relationship_id = p_relationship_id
     GROUP BY obligation_id
   ) a ON a.obligation_id = o.id
+  LEFT JOIN (
+    SELECT r.original_operation_id, sum(r.amount_minor) AS reversed_minor
+    FROM ledger.reversals r
+    JOIN ledger.operations rop ON rop.operation_id = r.source_operation_id
+    WHERE r.relationship_id = p_relationship_id AND rop.business_state = 'approved'
+    GROUP BY r.original_operation_id
+  ) rv ON rv.original_operation_id = o.source_operation_id
   WHERE o.relationship_id = p_relationship_id AND op.cycle_id = cycle_id_now;
 
   SELECT COALESCE(sum(p.amount_minor - COALESCE(a.allocated, 0)), 0)
@@ -738,7 +745,7 @@ BEGIN
   END IF;
 
   IF p_decision = 'approved' THEN
-    SELECT COALESCE(sum(o.amount_minor - COALESCE(a.allocated, 0) - COALESCE(o.credit_applied_minor, 0)), 0)
+    SELECT COALESCE(sum(o.amount_minor - COALESCE(a.allocated, 0) - COALESCE(o.credit_applied_minor, 0) - COALESCE(rv.reversed_minor, 0)), 0)
     INTO outstanding_obligations
     FROM ledger.obligations o
     JOIN ledger.operations op ON op.operation_id = o.source_operation_id
@@ -747,6 +754,13 @@ BEGIN
       FROM ledger.allocations WHERE relationship_id = p_relationship_id
       GROUP BY obligation_id
     ) a ON a.obligation_id = o.id
+    LEFT JOIN (
+      SELECT r.original_operation_id, sum(r.amount_minor) AS reversed_minor
+      FROM ledger.reversals r
+      JOIN ledger.operations rop ON rop.operation_id = r.source_operation_id
+      WHERE r.relationship_id = p_relationship_id AND rop.business_state = 'approved'
+      GROUP BY r.original_operation_id
+    ) rv ON rv.original_operation_id = o.source_operation_id
     WHERE o.relationship_id = p_relationship_id AND op.cycle_id = current_cycle;
 
     SELECT COALESCE(sum(p.amount_minor - COALESCE(a.allocated, 0)), 0)
