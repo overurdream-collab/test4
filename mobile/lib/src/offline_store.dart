@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/widgets.dart';
@@ -85,10 +86,8 @@ class SyncEvent {
 ///
 /// This seam keeps the store logic reusable when the SQLCipher implementation is
 /// audited or replaced. Production code uses the SQLCipher opener below.
-typedef OfflineStoreDatabaseOpener = Future<Database> Function({
-  required String path,
-  required String password,
-});
+typedef OfflineStoreDatabaseOpener =
+    Future<Database> Function({required String path, required String password});
 
 class OfflineStore {
   OfflineStore._(this._database);
@@ -105,14 +104,22 @@ class OfflineStore {
     WidgetsFlutterBinding.ensureInitialized();
     final storage = secureStorage ?? const FlutterSecureStorage();
     var key = await storage.read(key: offlineStoreDatabaseKeyName);
+    final databaseExists = await File(path).exists();
     if (key == null) {
+      if (databaseExists) {
+        throw StateError(
+          'Local database exists but its encryption key is missing; refusing to create a replacement key or overwrite existing data.',
+        );
+      }
       final random = Random.secure();
       final bytes = List<int>.generate(32, (_) => random.nextInt(256));
       key = base64UrlEncode(bytes);
       await storage.write(key: offlineStoreDatabaseKeyName, value: key);
     }
     if (key.length < 40) {
-      throw StateError('Stored local database key is invalid; refusing to open database.');
+      throw StateError(
+        'Stored local database key is invalid; refusing to open database.',
+      );
     }
 
     final opener = databaseOpener ?? _openSqlCipherDatabase;
@@ -236,13 +243,19 @@ class OfflineStore {
     DateTime? clientCreatedAt,
   }) async {
     if (!_supportedOperationTypes.contains(operationType)) {
-      throw ArgumentError.value(operationType, 'operationType', 'Unsupported operation type');
+      throw ArgumentError.value(
+        operationType,
+        'operationType',
+        'Unsupported operation type',
+      );
     }
     if (baseServerVersion < 0) {
       throw ArgumentError.value(baseServerVersion, 'baseServerVersion');
     }
     final payloadJson = _canonicalJson(payload);
-    final createdAt = (clientCreatedAt ?? DateTime.now()).toUtc().toIso8601String();
+    final createdAt = (clientCreatedAt ?? DateTime.now())
+        .toUtc()
+        .toIso8601String();
     await _database.transaction((transaction) async {
       final existing = await transaction.query(
         'local_operations',
@@ -252,12 +265,15 @@ class OfflineStore {
       );
       if (existing.isNotEmpty) {
         final row = existing.first;
-        final same = row['relationship_id'] == relationshipId &&
+        final same =
+            row['relationship_id'] == relationshipId &&
             row['operation_type'] == operationType &&
             row['payload_json'] == payloadJson &&
             row['base_server_version'] == baseServerVersion;
         if (!same) {
-          throw StateError('operationId already exists with different local content');
+          throw StateError(
+            'operationId already exists with different local content',
+          );
         }
         return;
       }
@@ -316,7 +332,8 @@ class OfflineStore {
         ''',
         [operationId],
       );
-      if (changed != 1) throw StateError('Operation is not eligible for sending');
+      if (changed != 1)
+        throw StateError('Operation is not eligible for sending');
     });
   }
 
@@ -332,7 +349,8 @@ class OfflineStore {
         where: 'operation_id = ? AND transport_state IN (?,?)',
         whereArgs: [operationId, 'sending', 'queued'],
       );
-      if (changed != 1) throw StateError('Operation cannot be returned to the outbox');
+      if (changed != 1)
+        throw StateError('Operation cannot be returned to the outbox');
       await transaction.update(
         'outbox',
         {'next_attempt_at': retryAt?.toUtc().toIso8601String()},
@@ -364,7 +382,8 @@ class OfflineStore {
         where: 'operation_id = ?',
         whereArgs: [operationId],
       );
-      if (changed != 1) throw StateError('Accepted operation does not exist locally');
+      if (changed != 1)
+        throw StateError('Accepted operation does not exist locally');
       await transaction.delete(
         'outbox',
         where: 'operation_id = ?',
@@ -381,7 +400,8 @@ class OfflineStore {
         where: 'operation_id = ?',
         whereArgs: [operationId],
       );
-      if (changed != 1) throw StateError('Conflicted operation does not exist locally');
+      if (changed != 1)
+        throw StateError('Conflicted operation does not exist locally');
       await transaction.delete(
         'outbox',
         where: 'operation_id = ?',
@@ -423,7 +443,9 @@ class OfflineStore {
         }
         if (event.serverSequence <= cursor) continue;
         if (event.serverSequence != cursor + 1) {
-          throw StateError('Sync event gap: expected ${cursor + 1}, got ${event.serverSequence}');
+          throw StateError(
+            'Sync event gap: expected ${cursor + 1}, got ${event.serverSequence}',
+          );
         }
 
         if (event.eventType == 'operation.created') {
@@ -432,8 +454,11 @@ class OfflineStore {
           );
           final operationType = event.payload['operationType'] as String?;
           final businessState = event.payload['businessState'] as String?;
-          final serverVersion = (event.payload['serverVersion'] as num?)?.toInt();
-          if (operationType == null || businessState == null || serverVersion == null) {
+          final serverVersion = (event.payload['serverVersion'] as num?)
+              ?.toInt();
+          if (operationType == null ||
+              businessState == null ||
+              serverVersion == null) {
             throw StateError('Malformed operation.created event');
           }
 
@@ -473,7 +498,8 @@ class OfflineStore {
           );
         } else if (event.eventType == 'operation.state_changed') {
           final businessState = event.payload['businessState'] as String?;
-          final serverVersion = (event.payload['serverVersion'] as num?)?.toInt();
+          final serverVersion = (event.payload['serverVersion'] as num?)
+              ?.toInt();
           if (businessState == null || serverVersion == null) {
             throw StateError('Malformed operation.state_changed event');
           }
@@ -489,7 +515,9 @@ class OfflineStore {
             whereArgs: [event.operationId, relationshipId],
           );
           if (changed != 1) {
-            throw StateError('State event arrived before its operation.created event');
+            throw StateError(
+              'State event arrived before its operation.created event',
+            );
           }
         } else {
           throw StateError('Unsupported sync event type: ${event.eventType}');
@@ -505,11 +533,10 @@ class OfflineStore {
           'received_at': DateTime.now().toUtc().toIso8601String(),
         });
         cursor = event.serverSequence;
-        await transaction.insert(
-          'sync_cursors',
-          {'relationship_id': relationshipId, 'last_server_sequence': cursor},
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        );
+        await transaction.insert('sync_cursors', {
+          'relationship_id': relationshipId,
+          'last_server_sequence': cursor,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
       }
     });
   }
