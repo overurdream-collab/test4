@@ -125,7 +125,7 @@ test("step 9: credit application, refund, reversal, and concurrent allocations",
     clientCreatedAt: new Date().toISOString()
   });
   assert.equal(overCredit.statusCode, 200, overCredit.body);
-  const overCreditDecision = await decide(buyer.token, relation, (json<{ operationId: string }>(overCredit.body)).operationId, "approved", "too much credit");
+  const overCreditDecision = await decide(seller.token, relation, (json<{ operationId: string }>(overCredit.body)).operationId, "approved", "too much credit");
   assert.equal(overCreditDecision.statusCode, 422, overCreditDecision.body);
 
   const duplicateCredit = await submit(buyer.token, relation, {
@@ -134,7 +134,7 @@ test("step 9: credit application, refund, reversal, and concurrent allocations",
     clientCreatedAt: new Date().toISOString()
   });
   assert.equal(duplicateCredit.statusCode, 200, duplicateCredit.body);
-  const duplicateCreditDecision = await decide(buyer.token, relation, (json<{ operationId: string }>(duplicateCredit.body)).operationId, "approved", "duplicate credit");
+  const duplicateCreditDecision = await decide(seller.token, relation, (json<{ operationId: string }>(duplicateCredit.body)).operationId, "approved", "duplicate credit");
   assert.equal(duplicateCreditDecision.statusCode, 422, duplicateCreditDecision.body);
 
   const resetRequestId = randomUUID();
@@ -217,7 +217,7 @@ test("step 9: credit application, refund, reversal, and concurrent allocations",
     clientCreatedAt: new Date().toISOString()
   });
   assert.equal(overRefund.statusCode, 200, overRefund.body);
-  const overRefundDecision = await decide(buyer.token, relation, (json<{ operationId: string }>(overRefund.body)).operationId, "approved", "too much refund");
+  const overRefundDecision = await decide(seller.token, relation, (json<{ operationId: string }>(overRefund.body)).operationId, "approved", "too much refund");
   assert.equal(overRefundDecision.statusCode, 422, overRefundDecision.body);
 
   // ---------- reversal linked to the original operation ----------
@@ -303,7 +303,7 @@ test("step 9: credit application, refund, reversal, and concurrent allocations",
     clientCreatedAt: new Date().toISOString()
   });
   assert.equal(overAllocate.statusCode, 200, overAllocate.body);
-  const overAllocateDecision = await decide(buyer.token, relation, (json<{ operationId: string }>(overAllocate.body)).operationId, "approved", "over allocation");
+  const overAllocateDecision = await decide(seller.token, relation, (json<{ operationId: string }>(overAllocate.body)).operationId, "approved", "over allocation");
   assert.equal(overAllocateDecision.statusCode, 422, overAllocateDecision.body);
 
   const finalAllocationId = randomUUID();
