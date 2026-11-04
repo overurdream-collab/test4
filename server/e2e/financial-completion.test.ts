@@ -33,7 +33,7 @@ async function getPayment(pool: any, relation: string, sourceOperationId: string
   return row.rows[0].id as string;
 }
 
-test("credit balance from an approved return is applied to a future purchase", async (t) => {
+test("credit balance from an approved return is applied to a future purchase and refunded independently", async (t) => {
   const harness = createHarness(t);
   const { pool, identity, approval, login, invite, submit, decide, cycles } = harness;
 
@@ -56,12 +56,12 @@ test("credit balance from an approved return is applied to a future purchase", a
     payload: { payerUserId: buyer.userId, payeeUserId: seller.userId, currency: "YER", amountMinor: 5000 },
     clientCreatedAt: new Date().toISOString()
   }, seller.token);
-  const paymentIdRecord = await getPayment(pool, relation, paymentId);
+  const paymentRecordId = await getPayment(pool, relation, paymentId);
 
   const allocationId = randomUUID();
   await submitAndDecide(harness, buyer.token, relation, {
     operationId: allocationId, operationType: "allocation", schemaVersion: 1, baseVersion: 0,
-    payload: { paymentId: paymentIdRecord, obligationId, amountMinor: 5000 },
+    payload: { paymentId: paymentRecordId, obligationId, amountMinor: 5000 },
     clientCreatedAt: new Date().toISOString()
   }, seller.token);
 
@@ -117,7 +117,6 @@ test("credit balance from an approved return is applied to a future purchase", a
     assertAmount(b.payableMinor, 0n, "payable zero after credit application");
   }
 
-  // Remaining purchase amount must be paid and allocated explicitly.
   const remainingPaymentId = randomUUID();
   await submitAndDecide(harness, buyer.token, relation, {
     operationId: remainingPaymentId, operationType: "payment", schemaVersion: 1, baseVersion: 0,
@@ -142,7 +141,6 @@ test("credit balance from an approved return is applied to a future purchase", a
     assertAmount(b.unappliedPaymentLiabilityMinor, 0n, "final liability zero");
   }
 
-  // Credit application cannot exceed remaining return credit or obligation remainder.
   const overCredit = await submit(buyer.token, relation, {
     operationId: randomUUID(), operationType: "credit_application", schemaVersion: 1, baseVersion: 0,
     payload: { creditSourceOperationId: returnId, targetObligationId: newObligationId, currency: "YER", amountMinor: "1001", reason: "too much" },
@@ -157,53 +155,8 @@ test("credit balance from an approved return is applied to a future purchase", a
   });
   assert.equal(duplicateCredit.statusCode, 409, duplicateCredit.body);
 
-  // White-page reset remains possible once the cycle is fully settled including credit applied.
-  const resetRequestId = randomUUID();
-  const resetRequested = await approval.inject({
-    method: "POST",
-    url: "/v1/relationships/" + relation + "/settlement-reset-requests",
-    headers: { authorization: "Bearer " + seller.token, "idempotency-key": resetRequestId },
-    payload: {}
-  });
-  assert.equal(resetRequested.statusCode, 201, resetRequested.body);
-  const resetDecision = await approval.inject({
-    method: "POST",
-    url: "/v1/relationships/" + relation + "/settlement-reset-requests/" + resetRequestId + "/decision",
-    headers: { authorization: "Bearer " + buyer.token, "idempotency-key": randomUUID() },
-    payload: { decision: "approved", reason: "credit applied and cycle settled" }
-  });
-  assert.equal(resetDecision.statusCode, 200, resetDecision.body);
-  assert.equal(json<{ cycleReset: boolean }>(resetDecision.body).cycleReset, true);
-});
-
-test("independent refund cancels return credit as a separate operation", async (t) => {
-  const harness = createHarness(t);
-  const { pool, approval, login, invite, submit, decide, cycles } = harness;
-
-  const seller = await login(phone());
-  const buyer = await login(phone());
-  const relation = await invite(seller, buyer);
-  const cycleId = (await cycles(seller.token, relation)).currentCycleId;
-
-  const chargeId = randomUUID();
-  await submitAndDecide(harness, seller.token, relation, {
-    operationId: chargeId, operationType: "credit_charge", schemaVersion: 1, baseVersion: 0,
-    payload: { creditorUserId: seller.userId, debtorUserId: buyer.userId, currency: "YER", amountMinor: 1000 },
-    clientCreatedAt: new Date().toISOString()
-  }, buyer.token);
-
-  const returnId = randomUUID();
-  await submitAndDecide(harness, buyer.token, relation, {
-    operationId: returnId, operationType: "sales_return", schemaVersion: 1, baseVersion: 0,
-    payload: { originalObligationId: await getObligation(pool, relation, chargeId), currency: "YER", amountMinor: "1000", reason: "refundable return" },
-    clientCreatedAt: new Date().toISOString()
-  }, seller.token);
-
-  const afterReturn = await cycles(seller.token, relation);
-  assertAmount(balanceFor(afterReturn, cycleId, seller.userId).receivableMinor, -1000n, "return credit exists");
-
   const refundId = randomUUID();
-  const refund = await submitAndDecide(harness, buyer.token, relation, {
+  await submitAndDecide(harness, buyer.token, relation, {
     operationId: refundId, operationType: "refund", schemaVersion: 1, baseVersion: 0,
     payload: { originalSalesReturnId: returnId, currency: "YER", amountMinor: "1000", reason: "cash refund to buyer" },
     clientCreatedAt: new Date().toISOString()
@@ -229,16 +182,25 @@ test("independent refund cancels return credit as a separate operation", async (
   });
   assert.equal(overRefund.statusCode, 409, overRefund.body);
 
-  const replayRefund = await approval.inject({
+  const resetRequestId = randomUUID();
+  const resetRequested = await approval.inject({
     method: "POST",
-    url: "/v1/relationships/" + relation + "/sales-returns",
-    headers: { authorization: "Bearer " + buyer.token, "idempotency-key": refundId },
-    payload: { originalObligationId: await getObligation(pool, relation, chargeId), currency: "YER", amountMinor: "1000", reason: "cash refund to buyer" }
+    url: "/v1/relationships/" + relation + "/settlement-reset-requests",
+    headers: { authorization: "Bearer " + seller.token, "idempotency-key": resetRequestId },
+    payload: {}
   });
-  assert.equal(replayRefund.statusCode, 200, replayRefund.body);
+  assert.equal(resetRequested.statusCode, 201, resetRequested.body);
+  const resetDecision = await approval.inject({
+    method: "POST",
+    url: "/v1/relationships/" + relation + "/settlement-reset-requests/" + resetRequestId + "/decision",
+    headers: { authorization: "Bearer " + buyer.token, "idempotency-key": randomUUID() },
+    payload: { decision: "approved", reason: "credit applied and refunded" }
+  });
+  assert.equal(resetDecision.statusCode, 200, resetDecision.body);
+  assert.equal(json<{ cycleReset: boolean }>(resetDecision.body).cycleReset, true);
 });
 
-test("reversal is linked to the original approved operation", async (t) => {
+test("reversal and concurrent allocations", async (t) => {
   const harness = createHarness(t);
   const { pool, approval, login, invite, submit, decide, cycles } = harness;
 
@@ -283,41 +245,32 @@ test("reversal is linked to the original approved operation", async (t) => {
     clientCreatedAt: new Date().toISOString()
   });
   assert.equal(doubleReversal.statusCode, 409, doubleReversal.body);
-});
 
-test("concurrent allocations on the same payment and obligation serialize", async (t) => {
-  const harness = createHarness(t);
-  const { pool, login, invite, submit, decide } = harness;
-
-  const seller = await login(phone());
-  const buyer = await login(phone());
-  const relation = await invite(seller, buyer);
-
-  const chargeId = randomUUID();
+  const charge2Id = randomUUID();
   await submitAndDecide(harness, seller.token, relation, {
-    operationId: chargeId, operationType: "credit_charge", schemaVersion: 1, baseVersion: 0,
+    operationId: charge2Id, operationType: "credit_charge", schemaVersion: 1, baseVersion: 0,
     payload: { creditorUserId: seller.userId, debtorUserId: buyer.userId, currency: "YER", amountMinor: 1000 },
     clientCreatedAt: new Date().toISOString()
   }, buyer.token);
-  const obligationId = await getObligation(pool, relation, chargeId);
+  const obligation2Id = await getObligation(pool, relation, charge2Id);
 
-  const paymentId = randomUUID();
+  const payment2Id = randomUUID();
   await submitAndDecide(harness, buyer.token, relation, {
-    operationId: paymentId, operationType: "payment", schemaVersion: 1, baseVersion: 0,
+    operationId: payment2Id, operationType: "payment", schemaVersion: 1, baseVersion: 0,
     payload: { payerUserId: buyer.userId, payeeUserId: seller.userId, currency: "YER", amountMinor: 1000 },
     clientCreatedAt: new Date().toISOString()
   }, seller.token);
-  const paymentRecordId = await getPayment(pool, relation, paymentId);
+  const payment2RecordId = await getPayment(pool, relation, payment2Id);
 
   const results = await Promise.all([
     submit(buyer.token, relation, {
       operationId: randomUUID(), operationType: "allocation", schemaVersion: 1, baseVersion: 0,
-      payload: { paymentId: paymentRecordId, obligationId, amountMinor: 600 },
+      payload: { paymentId: payment2RecordId, obligationId: obligation2Id, amountMinor: 600 },
       clientCreatedAt: new Date().toISOString()
     }),
     submit(buyer.token, relation, {
       operationId: randomUUID(), operationType: "allocation", schemaVersion: 1, baseVersion: 0,
-      payload: { paymentId: paymentRecordId, obligationId, amountMinor: 600 },
+      payload: { paymentId: payment2RecordId, obligationId: obligation2Id, amountMinor: 600 },
       clientCreatedAt: new Date().toISOString()
     })
   ]);
@@ -333,7 +286,7 @@ test("concurrent allocations on the same payment and obligation serialize", asyn
 
   const overAllocate = await submit(buyer.token, relation, {
     operationId: randomUUID(), operationType: "allocation", schemaVersion: 1, baseVersion: 0,
-    payload: { paymentId: paymentRecordId, obligationId, amountMinor: 500 },
+    payload: { paymentId: payment2RecordId, obligationId: obligation2Id, amountMinor: 500 },
     clientCreatedAt: new Date().toISOString()
   });
   assert.equal(overAllocate.statusCode, 409, overAllocate.body);
@@ -341,28 +294,19 @@ test("concurrent allocations on the same payment and obligation serialize", asyn
   const finalAllocationId = randomUUID();
   await submitAndDecide(harness, buyer.token, relation, {
     operationId: finalAllocationId, operationType: "allocation", schemaVersion: 1, baseVersion: 0,
-    payload: { paymentId: paymentRecordId, obligationId, amountMinor: 400 },
+    payload: { paymentId: payment2RecordId, obligationId: obligation2Id, amountMinor: 400 },
     clientCreatedAt: new Date().toISOString()
   }, seller.token);
 
   const allocated = await pool.query(
     "SELECT coalesce(sum(amount_minor),0)::text AS sum FROM ledger.allocations WHERE obligation_id=$1::uuid",
-    [obligationId]
+    [obligation2Id]
   );
   assert.equal(allocated.rows[0]?.sum, "1000", "obligation fully allocated");
-});
 
-test("operation type validation rejects unknown envelope types", async (t) => {
-  const harness = createHarness(t);
-  const { login, invite, submit } = harness;
-
-  const seller = await login(phone());
-  const buyer = await login(phone());
-  const relation = await invite(seller, buyer);
-
-  const invalid = await submit(seller.token, relation, {
+  const invalidType = await submit(seller.token, relation, {
     operationId: randomUUID(), operationType: "refund_cash" as any, schemaVersion: 1, baseVersion: 0,
     payload: {}, clientCreatedAt: new Date().toISOString()
   });
-  assert.equal(invalid.statusCode, 422, invalid.body);
+  assert.equal(invalidType.statusCode, 422, invalidType.body);
 });

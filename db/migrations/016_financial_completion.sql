@@ -133,6 +133,22 @@ CREATE TRIGGER credit_applications_post_to_journal
 AFTER INSERT ON ledger.credit_applications
 FOR EACH ROW EXECUTE FUNCTION ledger.post_credit_application_to_journal();
 
+CREATE OR REPLACE FUNCTION ledger.apply_credit_application_to_obligation()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  UPDATE ledger.obligations
+  SET credit_applied_minor = credit_applied_minor + NEW.amount_minor
+  WHERE id = NEW.target_obligation_id
+    AND relationship_id = NEW.relationship_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Target obligation not found' USING ERRCODE = '23503';
+  END IF;
+  RETURN NEW;
+END; $$;
+CREATE TRIGGER credit_applications_update_obligation_credit
+AFTER INSERT ON ledger.credit_applications
+FOR EACH ROW EXECUTE FUNCTION ledger.apply_credit_application_to_obligation();
+
 CREATE OR REPLACE FUNCTION ledger.post_reversal_to_journal()
 RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
