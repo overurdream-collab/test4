@@ -1,0 +1,68 @@
+name: Backup/restore verification
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    paths:
+      - "db/**"
+      - "server/**"
+      - ".github/workflows/backup-restore.yml"
+      - ".github/workflows/server-e2e.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  backup-restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ledger_test
+          POSTGRES_PASSWORD: ledger_test
+          POSTGRES_DB: ledger_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ledger_test -d ledger_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install server dependencies
+        working-directory: server
+        run: npm install --no-package-lock --no-audit --no-fund
+      - name: Apply all database migrations
+        env:
+          PGPASSWORD: ledger_test
+        run: |
+          set -euo pipefail
+          for migration in db/migrations/*.sql; do
+            echo "Applying $migration"
+            psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f "$migration"
+          done
+      - name: Seed financial data through real HTTP E2E
+        working-directory: server
+        env:
+          DATABASE_URL: postgres://ledger_test:ledger_test@localhost:5432/ledger_test
+          ACCESS_TOKEN_SECRET: ci-access-token-secret-32-bytes-minimum
+          OTP_PEPPER: ci-otp-pepper-secret-32-bytes-minimum
+          REFRESH_TOKEN_PEPPER: ci-refresh-token-secret-32-bytes-minimum
+        run: npm run test:e2e
+      - name: Verify PostgreSQL backup and restore
+        env:
+          PGHOST: localhost
+          PGPORT: 5432
+          PGUSER: ledger_test
+          PGPASSWORD: ledger_test
+          PGDATABASE: ledger_test
+          RESTORE_DB: ledger_test_restore
+        run: bash db/backup/verify-restore.sh

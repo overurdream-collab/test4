@@ -20,7 +20,8 @@ void main() {
     expect(
       Platform.isAndroid,
       isTrue,
-      reason: 'v1 target is Android; other platforms are documented as deferred.',
+      reason:
+          'v1 target is Android; other platforms are documented as deferred.',
     );
     databaseDirectory = Directory(await sqlcipher.getDatabasesPath());
     await databaseDirectory.create(recursive: true);
@@ -42,7 +43,8 @@ void main() {
   testWidgets(
     'SQLCipher encrypts payloads at rest and survives reopen',
     (tester) async {
-      final marker = 'PLAINTEXT_MARKER_${DateTime.now().microsecondsSinceEpoch}';
+      final marker =
+          'PLAINTEXT_MARKER_${DateTime.now().microsecondsSinceEpoch}';
       const operationId = '33000000-0000-0000-0000-000000000101';
 
       var store = await OfflineStore.openEncrypted(
@@ -53,19 +55,15 @@ void main() {
         operationId: operationId,
         relationshipId: _relationshipId,
         operationType: 'credit_charge',
-        payload: {
-          'currency': 'YER',
-          'amountMinor': 1500,
-          'marker': marker,
-        },
+        payload: {'currency': 'YER', 'amountMinor': 1500, 'marker': marker},
         baseServerVersion: 0,
         clientCreatedAt: DateTime.utc(2026, 11, 2),
       );
       await store.close();
 
-      final files = _databaseFiles(databasePath)
-          .where((path) => File(path).existsSync())
-          .toList();
+      final files = _databaseFiles(
+        databasePath,
+      ).where((path) => File(path).existsSync()).toList();
       expect(files, isNotEmpty, reason: 'Expected SQLCipher database files.');
 
       final sqliteHeader = utf8.encode('SQLite format 3\u0000');
@@ -150,10 +148,7 @@ void main() {
         reason: 'Wrong key must not rewrite the database.',
       );
 
-      await storage.write(
-        key: offlineStoreDatabaseKeyName,
-        value: originalKey,
-      );
+      await storage.write(key: offlineStoreDatabaseKeyName, value: originalKey);
       store = await OfflineStore.openEncrypted(
         path: databasePath,
         secureStorage: storage,
@@ -167,12 +162,68 @@ void main() {
   );
 
   testWidgets(
+    'missing key refuses to open existing database without creating a replacement key',
+    (tester) async {
+      const operationId = '33000000-0000-0000-0000-000000000103';
+      const marker = 'MISSING_KEY_PRESERVATION_MARKER';
+
+      var store = await OfflineStore.openEncrypted(
+        path: databasePath,
+        secureStorage: storage,
+      );
+      await store.enqueueOperation(
+        operationId: operationId,
+        relationshipId: _relationshipId,
+        operationType: 'credit_charge',
+        payload: {'currency': 'YER', 'amountMinor': 700, 'marker': marker},
+        baseServerVersion: 0,
+      );
+      await store.close();
+
+      final originalKey = await storage.read(key: offlineStoreDatabaseKeyName);
+      expect(originalKey, isNotNull);
+      final originalBytes = await File(databasePath).readAsBytes();
+
+      await storage.delete(key: offlineStoreDatabaseKeyName);
+
+      await expectLater(
+        OfflineStore.openEncrypted(path: databasePath, secureStorage: storage),
+        throwsA(isA<StateError>()),
+      );
+
+      expect(
+        await storage.read(key: offlineStoreDatabaseKeyName),
+        isNull,
+        reason: 'Missing key must not be replaced automatically.',
+      );
+      expect(
+        await File(databasePath).readAsBytes(),
+        originalBytes,
+        reason:
+            'Existing database must not be rewritten when the key is missing.',
+      );
+
+      await storage.write(key: offlineStoreDatabaseKeyName, value: originalKey);
+      store = await OfflineStore.openEncrypted(
+        path: databasePath,
+        secureStorage: storage,
+      );
+      final recovered = await store.getOperation(operationId);
+      expect(recovered, isNotNull);
+      expect(recovered!.payload['marker'], marker);
+      final pending = await store.pendingOperations(
+        relationshipId: _relationshipId,
+      );
+      expect(pending, isNotEmpty);
+      await store.close();
+    },
+    timeout: const Timeout(Duration(minutes: 5)),
+  );
+
+  testWidgets(
     'short invalid key is rejected before creating a database',
     (tester) async {
-      await storage.write(
-        key: offlineStoreDatabaseKeyName,
-        value: 'too-short',
-      );
+      await storage.write(key: offlineStoreDatabaseKeyName, value: 'too-short');
 
       await expectLater(
         OfflineStore.openEncrypted(path: databasePath, secureStorage: storage),
@@ -185,11 +236,11 @@ void main() {
 }
 
 List<String> _databaseFiles(String path) => [
-      path,
-      '$path-wal',
-      '$path-shm',
-      '$path-journal',
-    ];
+  path,
+  '$path-wal',
+  '$path-shm',
+  '$path-journal',
+];
 
 String _validDifferentKey() {
   final bytes = List<int>.generate(32, (index) => (index * 7 + 11) % 256);
