@@ -35,7 +35,7 @@ export type Login = { token: string; userId: string; deviceId: string; phoneE164
 
 export type OperationEnvelope = {
   operationId: string;
-  operationType: "credit_charge" | "payment" | "allocation";
+  operationType: "credit_charge" | "payment" | "allocation" | "sales_return" | "refund" | "reversal" | "credit_application";
   schemaVersion: 1;
   baseVersion: number;
   payload: Record<string, unknown>;
@@ -119,6 +119,7 @@ export function createHarness(t: TestContext) {
     });
     assert.equal(verified.statusCode, 200, verified.body);
     const body = json<{ accessToken: string; user: { id: string } }>(verified.body);
+    await new Promise((resolve) => setTimeout(resolve, 1200));
     return { token: body.accessToken, userId: body.user.id, deviceId, phoneE164 };
   }
 

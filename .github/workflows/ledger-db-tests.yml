@@ -181,3 +181,8 @@ jobs:
         env:
           PGPASSWORD: ledger_test
         run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/tests/016_admin_sales_return_switch_test.sql
+
+      - name: Apply financial completion migration
+        env:
+          PGPASSWORD: ledger_test
+        run: psql -h localhost -U ledger_test -d ledger_test -v ON_ERROR_STOP=1 -f db/migrations/016_financial_completion.sql
