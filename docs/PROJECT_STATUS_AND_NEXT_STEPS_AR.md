@@ -997,6 +997,44 @@
 
 ### الحدود
 - لا قاعدة إنتاجية ولا نشر ولا خدمة مدفوعة.
-- Android فقط؛ iOS مؤجل حتى提供 اختبار مضيف واستبعاد Keychain/iCloud.
+- Android فقط؛ iOS مؤجل حتى تتوفر إمكانية اختبار مضيف واستبعاد Keychain/iCloud.
 - لا نقطة نهاية استعادة حساب خادم بعد.
 - البوابة التالية: الخطوة 9 الإكمال المالي المتبقي (تطبيق الرصيد الدائن صراحةً على مشتريات لاحقة، رد نقدي مستقل، عكس وربطه بالأصل، حقول العملية والمرفقات، تزامن عمليتين على نفس الدفعة/الالتزام)، ثم الخطوة 10 الواجهات بعد اجتياز البوابات.
+
+## الخطوة 9 — الإكمال المالي المتبقي / 2026-11-04
+
+### التنفيذ
+- PR #54: https://github.com/overurdream-collab/test4/pull/54
+- Merge SHA: `e9300d0f913c35faca81fda92d96a13a5033c5e6`.
+- `db/migrations/016_financial_completion.sql`: أنواع عمليات جديدة `refund` و`reversal` و`credit_application` مع جداول `ledger.refunds` و`ledger.reversals` و`ledger.credit_applications` و`ledger.obligations.credit_applied_minor`.
+- `credit_application`: يطبق رصيد مرتجع معتمد على التزام لاحق للطرف/العملة نفسها، ويحدّث `credit_applied_minor` فقط دون إضافة قيود journal (لأن أثر البيع والمرتجع متقابلان أصلاً).
+- `refund`: رد نقدي مستقل مرتبط بمرتجع معتمد، ويعكس أثر رصيد المرتجع بقيود journal معاكسة ويخفض الرصيد المتبقي القابل للاستخدام.
+- `reversal`: مرتبط بعملية أصلية معتمدة، يرفض عكس عكس آخر، وينسخ قيود العملية الأصلية مع تبديل debit/credit في journal جديد.
+- حدود `refund` و`credit_application` تُفرض عند الموافقة (`23514` → `409` في approval API، و`422` في sync API)، وليس عند submit.
+- `request_settlement_reset` و`decide_settlement_reset` يحتسبان الآن العكس المعتمد ضمن تسوية الالتزام، ولا يُسمح بالتصفير مع عمليات معلقة.
+- `server/e2e/financial-completion.test.ts`: اختبار واحد يغطي تطبيق رصيد دائن، رفض over-credit والتكرار، رد نقدي مستقل ورفض over-refund، عكس مرتبط بالأصل ورفض العكس المكرر، وتزامن موافقتين على نفس الدفعة/الالتزام (واحدة تنجح والأخرى `409`) ثم تصفير الصفحة البيضاء.
+- `server/e2e/harness.ts`: دعم الأنواع الجديدة وزيادة تأخير OTP إلى `1200ms` لتجنب حد المعدل.
+- `server/src/sync-api.ts`: توسيع enum أنواع العمليات.
+- المرفقات: لا جدول مرفقات في v1؛ يُسمح ببيانات وصفية في `payload.reason` فقط.
+
+### الاختبارات
+- محليًا على PostgreSQL 16.15 وعلى قاعدة جديدة بعد تطبيق كل الهجرات 001–016: `tsc --noEmit` ناجح، وكل اختبارات `e2e/*.test.ts` نجحت (`4/4`).
+- PR CI عند `2834ef2`:
+  - Server financial lifecycle E2E Run `41902320345`: success.
+  - Approval API Run `41902320239`: success.
+  - Ledger PostgreSQL Run `41902320209`: success.
+  - Backup/restore Run `41902320274`: success.
+  - Two-device offline E2E Run `41902320293`: success.
+  - Flutter CI Run `41902320285`: success.
+- بعد الدمج على main عند `e9300d0`:
+  - Backup/restore Run `41902813539`: success.
+  - Ledger PostgreSQL Run `41902813482`: success.
+  - Server financial lifecycle E2E Run `41902813660`: success.
+  - Two-device offline E2E Run `41902813617`: success.
+  - Flutter CI Run `41902813739`: success.
+
+### الحدود
+- لا UI ولا نشر ولا قاعدة إنتاجية.
+- العكس مختبر على `credit_charge`؛ عكس الدفعات أو التخصيصات يحتاج سياسة تسوية إضافية قبل استخدامه إنتاجيًا.
+- لا جدول مرفقات ولا تخزين ملفات في v1.
+- البوابة التالية: الخطوة 10 الواجهات بعد اجتياز بوابات الخطوات السابقة.
