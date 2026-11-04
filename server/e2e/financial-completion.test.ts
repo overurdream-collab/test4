@@ -293,13 +293,20 @@ test("step 9: credit application, refund, reversal, and concurrent allocations",
   ]);
 
   const statuses = results.map((r) => r.statusCode);
-  assert.ok(statuses.includes(200), "one concurrent allocation must succeed");
-  assert.ok(statuses.includes(409), "the other concurrent allocation must fail");
+  assert.deepEqual(statuses, [200, 200], "both concurrent allocations are accepted before approval");
 
-  const successful = results.find((r) => r.statusCode === 200);
-  if (!successful) throw new Error("expected one concurrent allocation to succeed");
-  const successBody = json<{ operationId: string }>(successful.body);
-  await decide(buyer.token, relation, successBody.operationId, "approved", "approve winning allocation");
+  const decisions = await Promise.all(results.map((r) => {
+    const operationId = json<{ operationId: string }>(r.body).operationId;
+    return decide(seller.token, relation, operationId, "approved", "approve concurrent allocation");
+  }));
+  const decisionStatuses = decisions.map((r) => r.statusCode).sort((a, b) => a - b);
+  assert.deepEqual(decisionStatuses, [200, 409], "exactly one concurrent allocation is approved");
+
+  const losingIndex = decisions.findIndex((r) => r.statusCode === 409);
+  const losingResult = results[losingIndex];
+  if (losingIndex === -1 || !losingResult) throw new Error("expected one concurrent allocation to fail");
+  const losingOperationId = json<{ operationId: string }>(losingResult.body).operationId;
+  await rejectPending(harness, seller.token, relation, losingOperationId, "reject losing concurrent allocation");
 
   const overAllocate = await submit(buyer.token, relation, {
     operationId: randomUUID(), operationType: "allocation", schemaVersion: 1, baseVersion: 0,
