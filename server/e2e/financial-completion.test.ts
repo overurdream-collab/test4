@@ -219,6 +219,16 @@ test("step 9: credit application, refund, reversal, and concurrent allocations",
     clientCreatedAt: new Date().toISOString()
   }, seller.token);
 
+  const reversalOp = await pool.query(
+    "SELECT business_state FROM ledger.operations WHERE operation_id=$1::uuid AND relationship_id=$2::uuid",
+    [reversalId, relation]
+  );
+  assert.equal(reversalOp.rows[0]?.business_state, "approved", "reversal operation approved");
+  const reversalEvent = await pool.query(
+    "SELECT count(*)::text AS count FROM ledger.relationship_events WHERE operation_id=$1::uuid AND event_type='operation.state_changed'",
+    [reversalId]
+  );
+  assert.equal(reversalEvent.rows[0]?.count, "1", "reversal event recorded");
   const reversalRow = await pool.query(
     "SELECT count(*)::text AS count FROM ledger.reversals WHERE source_operation_id=$1::uuid",
     [reversalId]
