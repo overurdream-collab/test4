@@ -22,14 +22,14 @@ trap cleanup EXIT
 export PGHOST PGPORT PGUSER PGPASSWORD
 
 echo "Dumping source database ${PGDATABASE}..."
-pg_dump -Fc --no-owner --no-acl -d "$PGDATABASE" -f "$DUMP_FILE"
+pg_dump --no-owner --no-acl -d "$PGDATABASE" -f "$DUMP_FILE"
 
 echo "Recreating restore database ${RESTORE_DB}..."
 psql -v ON_ERROR_STOP=1 -d postgres -c "DROP DATABASE IF EXISTS \"${RESTORE_DB}\";"
 psql -v ON_ERROR_STOP=1 -d postgres -c "CREATE DATABASE \"${RESTORE_DB}\";"
 
 echo "Restoring into ${RESTORE_DB}..."
-pg_restore --no-owner --no-acl --exit-on-error -d "$RESTORE_DB" "$DUMP_FILE"
+grep -v '^SET transaction_timeout = 0;' "$DUMP_FILE" | psql -v ON_ERROR_STOP=1 -d "$RESTORE_DB"
 
 echo "Fingerprinting source and restored databases..."
 psql -v ON_ERROR_STOP=1 -d "$PGDATABASE" -f "$FINGERPRINT_SQL" > "$SOURCE_FP"
