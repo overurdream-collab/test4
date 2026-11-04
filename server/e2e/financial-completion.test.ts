@@ -126,7 +126,7 @@ test("step 9: credit application, refund, reversal, and concurrent allocations",
   });
   assert.equal(overCredit.statusCode, 200, overCredit.body);
   const overCreditDecision = await decide(seller.token, relation, (json<{ operationId: string }>(overCredit.body)).operationId, "approved", "too much credit");
-  assert.equal(overCreditDecision.statusCode, 422, overCreditDecision.body);
+  assert.equal(overCreditDecision.statusCode, 409, overCreditDecision.body);
 
   const duplicateCredit = await submit(buyer.token, relation, {
     operationId: randomUUID(), operationType: "credit_application", schemaVersion: 1, baseVersion: 0,
@@ -135,7 +135,7 @@ test("step 9: credit application, refund, reversal, and concurrent allocations",
   });
   assert.equal(duplicateCredit.statusCode, 200, duplicateCredit.body);
   const duplicateCreditDecision = await decide(seller.token, relation, (json<{ operationId: string }>(duplicateCredit.body)).operationId, "approved", "duplicate credit");
-  assert.equal(duplicateCreditDecision.statusCode, 422, duplicateCreditDecision.body);
+  assert.equal(duplicateCreditDecision.statusCode, 409, duplicateCreditDecision.body);
 
   const resetRequestId = randomUUID();
   const resetRequested = await approval.inject({
@@ -218,7 +218,7 @@ test("step 9: credit application, refund, reversal, and concurrent allocations",
   });
   assert.equal(overRefund.statusCode, 200, overRefund.body);
   const overRefundDecision = await decide(seller.token, relation, (json<{ operationId: string }>(overRefund.body)).operationId, "approved", "too much refund");
-  assert.equal(overRefundDecision.statusCode, 422, overRefundDecision.body);
+  assert.equal(overRefundDecision.statusCode, 409, overRefundDecision.body);
 
   // ---------- reversal linked to the original operation ----------
   const reversalChargeId = randomUUID();
@@ -304,7 +304,7 @@ test("step 9: credit application, refund, reversal, and concurrent allocations",
   });
   assert.equal(overAllocate.statusCode, 200, overAllocate.body);
   const overAllocateDecision = await decide(seller.token, relation, (json<{ operationId: string }>(overAllocate.body)).operationId, "approved", "over allocation");
-  assert.equal(overAllocateDecision.statusCode, 422, overAllocateDecision.body);
+  assert.equal(overAllocateDecision.statusCode, 409, overAllocateDecision.body);
 
   const finalAllocationId = randomUUID();
   await submitAndDecide(harness, buyer.token, relation, {
