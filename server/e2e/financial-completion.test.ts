@@ -137,25 +137,6 @@ test("step 9: credit application, refund, reversal, and concurrent allocations",
   const duplicateCreditDecision = await decide(seller.token, relation, (json<{ operationId: string }>(duplicateCredit.body)).operationId, "approved", "duplicate credit");
   assert.equal(duplicateCreditDecision.statusCode, 409, duplicateCreditDecision.body);
 
-  const resetRequestId = randomUUID();
-  const resetRequested = await approval.inject({
-    method: "POST",
-    url: "/v1/relationships/" + relation + "/settlement-reset-requests",
-    headers: { authorization: "Bearer " + seller.token, "idempotency-key": resetRequestId },
-    payload: {}
-  });
-  assert.equal(resetRequested.statusCode, 201, resetRequested.body);
-  const resetDecision = await approval.inject({
-    method: "POST",
-    url: "/v1/relationships/" + relation + "/settlement-reset-requests/" + resetRequestId + "/decision",
-    headers: { authorization: "Bearer " + buyer.token, "idempotency-key": randomUUID() },
-    payload: { decision: "approved", reason: "credit applied settles future purchase" }
-  });
-  assert.equal(resetDecision.statusCode, 200, resetDecision.body);
-  assert.equal(json<{ cycleReset: boolean }>(resetDecision.body).cycleReset, true);
-
-  cycleId = (await cycles(seller.token, relation)).currentCycleId;
-
   // ---------- independent refund cancels return credit ----------
   const refundChargeId = randomUUID();
   await submitAndDecide(harness, seller.token, relation, {
@@ -324,4 +305,28 @@ test("step 9: credit application, refund, reversal, and concurrent allocations",
     payload: {}, clientCreatedAt: new Date().toISOString()
   });
   assert.equal(invalidType.statusCode, 400, invalidType.body);
+
+  const finalCycleId = (await cycles(seller.token, relation)).currentCycleId;
+  for (const owner of [seller.userId, buyer.userId]) {
+    const b = balanceFor(await cycles(seller.token, relation), finalCycleId, owner);
+    assertAmount(b.receivableMinor, 0n, "final receivable zero");
+    assertAmount(b.payableMinor, 0n, "final payable zero");
+  }
+
+  const resetRequestId = randomUUID();
+  const resetRequested = await approval.inject({
+    method: "POST",
+    url: "/v1/relationships/" + relation + "/settlement-reset-requests",
+    headers: { authorization: "Bearer " + seller.token, "idempotency-key": resetRequestId },
+    payload: {}
+  });
+  assert.equal(resetRequested.statusCode, 201, resetRequested.body);
+  const resetDecision = await approval.inject({
+    method: "POST",
+    url: "/v1/relationships/" + relation + "/settlement-reset-requests/" + resetRequestId + "/decision",
+    headers: { authorization: "Bearer " + buyer.token, "idempotency-key": randomUUID() },
+    payload: { decision: "approved", reason: "all cycles settled after credit application, refund, reversal, and concurrency" }
+  });
+  assert.equal(resetDecision.statusCode, 200, resetDecision.body);
+  assert.equal(json<{ cycleReset: boolean }>(resetDecision.body).cycleReset, true);
 });
