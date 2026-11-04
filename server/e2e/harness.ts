@@ -35,7 +35,7 @@ export type Login = { token: string; userId: string; deviceId: string; phoneE164
 
 export type OperationEnvelope = {
   operationId: string;
-  operationType: "credit_charge" | "payment" | "allocation";
+  operationType: "credit_charge" | "payment" | "allocation" | "sales_return" | "refund" | "reversal" | "credit_application";
   schemaVersion: 1;
   baseVersion: number;
   payload: Record<string, unknown>;
