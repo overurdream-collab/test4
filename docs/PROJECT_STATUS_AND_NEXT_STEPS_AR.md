@@ -965,3 +965,38 @@
 - الاختبار يعمل على Linux مع SQLite FFI، وليس على هاتفين فيزيائيين أو محاكيين Android/iOS.
 - لا UI ولا نشر ولا قاعدة إنتاجية.
 - البوابة التالية إن لزم: اختبار جهاز/محاكي فعلي وسيناريو فقدان رد الشبكة بعد commit الخادم.
+
+## الخطوة 8 — النسخ الاحتياطي واستعادة المفتاح / 2026-11-04
+
+### التنفيذ
+- PR #53: https://github.com/overurdream-collab/test4/pull/53
+- Merge SHA: `05337729e366d75446252f9888dc680ef071f966`.
+- `db/backup/table_fingerprint.sql`: بصمة محددة لكل جداول `ledger` و`identity` (عدد الصفوف + تجزئة الصفوف) للمقارنة بين الأساس والقاعدة المستعادة.
+- `db/backup/verify-restore.sh`: ينقل `pg_dump` من أساس البيانات ويعيد إنشائها في قاعدة جديدة عبر `pg_restore` ثم يقارن البصمات ويفشل عند أي اختلاف.
+- `.github/workflows/backup-restore.yml`: يطبق كل الهجرات، يزرع بيانات مالية عبر E2E حقيقي على HTTP وPostgreSQL، ثم يتحقق من الاستعادة الكاملة ومطابقة الأرصدة بالمليم.
+- `mobile/lib/src/offline_store.dart`: إذا وجد ملف قاعدة البيانات والمفتاح مفقود، تطرح `StateError` وترفض إنشاء مفتاح بديل أو overwriting للبيانات.
+- `mobile/example/integration_test/encrypted_store_test.dart`: اختبار أن فقدان المفتاح لا ينشئ مفتاحًا بديلًا ولا يعيد كتابة قاعدة البيانات، وعند إرجاع المفتاح تعود العملية وتبقى `pendingOperations` غير فارغة.
+- Android: `AndroidManifest.xml` مع `fullBackupContent`/`dataExtractionRules` يستبعدان `database` و`sharedpref` من النسخ الاحتياطي والنقل بين الأجهزة.
+- `docs/BACKUP_RESTORE_POLICY_AR.md`: السياسة والحدود (لا قاعدة إنتاجية، لا نشر، لا iOS بعد، لا نقطة نهاية استعادة حساب خادم بعد).
+
+### الاختبارات
+- محليًا: `tsc --noEmit` ناجح، `dart format` و`flutter analyze` ناجحان، XML استثناءات Android سليم.
+- PR CI:
+  - Backup/restore Run `41889436441`: success.
+  - Ledger PostgreSQL Run `41889436686`: success.
+  - Server financial lifecycle E2E Run `41889436175`: success.
+  - Flutter CI Run `41889436441`: success.
+  - Android SQLCipher Run `41889436186`: success.
+  - Mobile offline store Run `41889436308`: success.
+- بعد الدمج على main:
+  - Backup/restore Run `41890530974`: success.
+  - Ledger PostgreSQL Run `41890530853`: success.
+  - Server financial lifecycle E2E Run `41890531135`: success.
+  - Flutter CI Run `41890530966`: success.
+  - Two-device offline E2E Run `41890531053`: success.
+
+### الحدود
+- لا قاعدة إنتاجية ولا نشر ولا خدمة مدفوعة.
+- Android فقط؛ iOS مؤجل حتى提供 اختبار مضيف واستبعاد Keychain/iCloud.
+- لا نقطة نهاية استعادة حساب خادم بعد.
+- البوابة التالية: الخطوة 9 الإكمال المالي المتبقي (تطبيق الرصيد الدائن صراحةً على مشتريات لاحقة، رد نقدي مستقل، عكس وربطه بالأصل، حقول العملية والمرفقات، تزامن عمليتين على نفس الدفعة/الالتزام)، ثم الخطوة 10 الواجهات بعد اجتياز البوابات.
