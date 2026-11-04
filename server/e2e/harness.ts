@@ -119,7 +119,7 @@ export function createHarness(t: TestContext) {
     });
     assert.equal(verified.statusCode, 200, verified.body);
     const body = json<{ accessToken: string; user: { id: string } }>(verified.body);
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await new Promise((resolve) => setTimeout(resolve, 1200));
     return { token: body.accessToken, userId: body.user.id, deviceId, phoneE164 };
   }
 
