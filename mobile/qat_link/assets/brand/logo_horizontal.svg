@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 240" fill="none">
+  <defs>
+    <linearGradient id="gh" x1="40" y1="20" x2="240" y2="220" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#12C85A"/><stop offset=".55" stop-color="#32E875"/><stop offset="1" stop-color="#70F5A4"/>
+    </linearGradient>
+  </defs>
+  <rect x="28" y="28" width="184" height="184" rx="46" fill="url(#gh)"/>
+  <path d="M120 66c-39 20-63 46-63 79 0 31 24 56 56 56 11 0 22-3 31-9-16-9-27-27-27-46 0-19 10-35 24-44-4-18-11-34-21-36Z" fill="#fff" opacity=".96"/>
+  <path d="M120 258c0-1 0-1 0 0Z" fill="#fff"/>
+  <path d="M120 194c39-20 63-46 63-79 0-31-24-56-56-56-11 0-22 3-31 9 16 9 27 27 27 46 0 19-10 35-24 44 4 18 11 34 21 36Z" fill="#26352D" opacity=".9" transform="translate(0 -12)"/>
+  <text x="258" y="112" font-family="Arial, Helvetica, sans-serif" font-size="74" font-weight="800" letter-spacing="4" fill="#26352D">QAT LINK</text>
+  <text x="260" y="168" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="600" fill="#12C85A">قات لينك</text>
+  <text x="260" y="208" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="500" fill="#84918A">أنت تسجل.. وأنا أعتمد.</text>
+</svg>

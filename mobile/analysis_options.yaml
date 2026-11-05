@@ -2,3 +2,4 @@
 analyzer:
   exclude:
     - example/**
+    - qat_link/**
