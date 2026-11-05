@@ -7,11 +7,12 @@ const pool = new Pool({
   max: 60,
   idleTimeoutMillis: 10_000,
   connectionTimeoutMillis: 10_000,
-  application_name: "ledger-financial-profile"
+  application_name: "ledger-financial-profile",
+  options: "-c pg_stat_statements.track=all"
 });
 const monitorPool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 2,
+  max: 4,
   application_name: "ledger-profile-monitor"
 });
 
@@ -79,6 +80,35 @@ async function createApprovedOperation(rel, type, actor, approver, payload) {
   return operationId;
 }
 
+async function readTopStatements() {
+  const result = await monitorPool.query(
+    "SELECT queryid::text AS queryid, calls::bigint AS calls, " +
+    "total_exec_time::numeric AS total_exec_time_ms, rows::bigint AS rows, " +
+    "shared_blks_hit::bigint AS shared_blks_hit, shared_blks_read::bigint AS shared_blks_read, " +
+    "temp_blks_written::bigint AS temp_blks_written, left(query,240) AS query " +
+    "FROM pg_stat_statements WHERE dbid=(SELECT oid FROM pg_database WHERE datname=current_database()) " +
+    "AND query NOT ILIKE '%pg_stat_statements%' AND query ILIKE '%ledger.%' ORDER BY total_exec_time DESC LIMIT 20"
+  );
+  return result.rows;
+}
+
+function statementDeltas(afterRows, beforeRows) {
+  const before = new Map(beforeRows.map(row => [row.queryid, row]));
+  return afterRows.map(row => {
+    const prior = before.get(row.queryid) ?? {};
+    return {
+      queryid: row.queryid,
+      query: row.query,
+      calls: Number(row.calls ?? 0) - Number(prior.calls ?? 0),
+      total_exec_time_ms: Number(row.total_exec_time_ms ?? 0) - Number(prior.total_exec_time_ms ?? 0),
+      rows: Number(row.rows ?? 0) - Number(prior.rows ?? 0),
+      shared_blks_hit: Number(row.shared_blks_hit ?? 0) - Number(prior.shared_blks_hit ?? 0),
+      shared_blks_read: Number(row.shared_blks_read ?? 0) - Number(prior.shared_blks_read ?? 0),
+      temp_blks_written: Number(row.temp_blks_written ?? 0) - Number(prior.temp_blks_written ?? 0)
+    };
+  }).sort((a, b) => b.total_exec_time_ms - a.total_exec_time_ms);
+}
+
 async function snapshot() {
   const [wal, database] = await Promise.all([
     monitorPool.query("SELECT wal_records, wal_fpi, wal_bytes, wal_buffers_full FROM pg_stat_wal"),
@@ -87,12 +117,18 @@ async function snapshot() {
   let statements = null;
   let statementsError = null;
   try {
-    const result = await monitorPool.query("SELECT COALESCE(sum(calls),0)::bigint AS calls, COALESCE(sum(total_exec_time),0)::numeric AS total_exec_time_ms, COALESCE(sum(shared_blks_hit),0)::bigint AS shared_blks_hit, COALESCE(sum(shared_blks_read),0)::bigint AS shared_blks_read, COALESCE(sum(temp_blks_written),0)::bigint AS temp_blks_written FROM pg_stat_statements");
+    const result = await monitorPool.query("SELECT COALESCE(sum(calls),0)::bigint AS calls, COALESCE(sum(total_exec_time),0)::numeric AS total_exec_time_ms, COALESCE(sum(shared_blks_hit),0)::bigint AS shared_blks_hit, COALESCE(sum(shared_blks_read),0)::bigint AS shared_blks_read, COALESCE(sum(temp_blks_written),0)::bigint AS temp_blks_written FROM pg_stat_statements WHERE dbid=(SELECT oid FROM pg_database WHERE datname=current_database()) AND query NOT ILIKE '%pg_stat_statements%' AND query ILIKE '%ledger.%'");
     statements = result.rows[0];
   } catch (error) {
     statementsError = String(error);
   }
-  return { wal: wal.rows[0], database: database.rows[0], statements, statementsError };
+  let statementsByQuery = null;
+  try {
+    statementsByQuery = await readTopStatements();
+  } catch (error) {
+    statementsError = [statementsError, String(error)].filter(Boolean).join("; ");
+  }
+  return { wal: wal.rows[0], database: database.rows[0], statements, statementsByQuery, statementsError };
 }
 
 async function profilePhase(concurrency, durationMs) {
@@ -100,13 +136,20 @@ async function profilePhase(concurrency, durationMs) {
   const waitSamples = Object.create(null);
   const lockSamples = Object.create(null);
   const activitySamples = [];
+  const waitingLockSamples = Object.create(null);
+  const walSamples = [];
+  const statementSamples = [];
+  let lastStatementSampleAt = 0;
+  try { await monitorPool.query("SELECT pg_stat_statements_reset()"); } catch (error) {
+    process.stderr.write("pg_stat_statements reset unavailable: " + String(error) + "\n");
+  }
   const before = await snapshot();
   let stopMonitor = false;
 
   const monitor = (async () => {
     while (!stopMonitor) {
       try {
-        const [waits, locks, activity] = await Promise.all([
+        const [waits, locks, activity, wal] = await Promise.all([
           monitorPool.query(
             "SELECT COALESCE(wait_event_type,'CPU_or_running') AS wait_type, " +
             "COALESCE(wait_event,'none') AS wait_event, state, count(*)::int AS sessions " +
@@ -124,7 +167,8 @@ async function profilePhase(concurrency, durationMs) {
             "max(clock_timestamp()-query_start) AS longest_query_age " +
             "FROM pg_stat_activity WHERE application_name='ledger-financial-profile' " +
             "GROUP BY state,wait_event_type,wait_event"
-          )
+          ),
+          monitorPool.query("SELECT wal_records, wal_fpi, wal_bytes, wal_buffers_full FROM pg_stat_wal")
         ]);
         for (const row of waits.rows) {
           const key = [row.wait_type, row.wait_event, row.state].join("|");
@@ -133,8 +177,20 @@ async function profilePhase(concurrency, durationMs) {
         for (const row of locks.rows) {
           const key = [row.locktype, row.mode, row.granted].join("|");
           lockSamples[key] = (lockSamples[key] ?? 0) + row.lock_count;
+          if (!row.granted) waitingLockSamples[[row.locktype, row.mode].join("|")] =
+            (waitingLockSamples[[row.locktype, row.mode].join("|")] ?? 0) + row.lock_count;
         }
-        activitySamples.push({ sampledAt: new Date().toISOString(), groups: activity.rows });
+        const sampledAt = new Date().toISOString();
+        activitySamples.push({ sampledAt, groups: activity.rows });
+        walSamples.push({ sampledAt, ...wal.rows[0] });
+        if (Date.now() - lastStatementSampleAt >= 5000) {
+          try {
+            statementSamples.push({ sampledAt, rows: await readTopStatements() });
+            lastStatementSampleAt = Date.now();
+          } catch (error) {
+            process.stderr.write("pg_stat_statements sample failed: " + String(error) + "\n");
+          }
+        }
       } catch (error) {
         process.stderr.write("monitor sample failed: " + String(error) + "\n");
       }
@@ -223,7 +279,11 @@ async function profilePhase(concurrency, durationMs) {
     stageLatencyMs: stageReport,
     sampledWaitEvents: waitSamples,
     sampledLocks: lockSamples,
+    sampledWaitingLocks: waitingLockSamples,
     sampledActivity: activitySamples,
+    sampledWal: walSamples,
+    sampledPgStatStatements: statementSamples,
+    topStatementDeltas: before.statementsByQuery && after.statementsByQuery ? statementDeltas(after.statementsByQuery, before.statementsByQuery) : null,
     walDelta: delta(after.wal, before.wal),
     databaseDelta: delta(after.database, before.database),
     pgStatStatementsAvailable: Boolean(before.statements && after.statements),
@@ -234,14 +294,28 @@ async function profilePhase(concurrency, durationMs) {
   if (errors > 0) throw new Error("financial profile had " + errors + " failed lifecycles");
 }
 
+const configuredDurationMs = Number.parseInt(process.env.FINANCIAL_PROFILE_DURATION_MS ?? "60000", 10);
+if (!Number.isInteger(configuredDurationMs) || configuredDurationMs < 10000 || configuredDurationMs > 300000) {
+  throw new Error("FINANCIAL_PROFILE_DURATION_MS must be an integer between 10000 and 300000");
+}
+
 try {
   const environment = await monitorPool.query(
     "SELECT version() AS version, current_setting('shared_buffers') AS shared_buffers, " +
     "current_setting('max_connections') AS max_connections"
   );
-  console.log(JSON.stringify({ profile: "financial lifecycle lock/WAL profile", environment: environment.rows[0] }));
-  await profilePhase(10, 10_000);
-  await profilePhase(50, 10_000);
+  console.log(JSON.stringify({ profile: "financial lifecycle lock/WAL/queryid profile", durationMs: configuredDurationMs, environment: environment.rows[0] }));
+  const journalSample = await monitorPool.query("SELECT id FROM ledger.journal_transactions LIMIT 1");
+  if (journalSample.rows[0]) {
+    const journalPlan = await monitorPool.query(
+      "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) SELECT count(*), COALESCE(sum(debit_minor),0), COALESCE(sum(credit_minor),0) " +
+      "FROM ledger.journal_entries WHERE journal_transaction_id=$1::uuid",
+      [journalSample.rows[0].id]
+    );
+    console.log(JSON.stringify({ label: "journal_balance_trigger_query_plan", journalTransactionId: journalSample.rows[0].id, plan: journalPlan.rows[0]["QUERY PLAN"] }));
+  }
+  await profilePhase(10, configuredDurationMs);
+  await profilePhase(50, configuredDurationMs);
 } finally {
   await Promise.all([pool.end(), monitorPool.end()]);
 }

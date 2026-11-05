@@ -62,8 +62,9 @@ jobs:
         env:
           DATABASE_URL: postgres://ledger_test:ledger_test@localhost:5432/ledger_test
         run: node bench/postgres-scale.mjs
-      - name: Profile financial lifecycle waits, locks, and WAL
+      - name: Profile financial lifecycle waits, locks, WAL, and query IDs
         working-directory: server
         env:
           DATABASE_URL: postgres://ledger_test:ledger_test@localhost:5432/ledger_test
+          FINANCIAL_PROFILE_DURATION_MS: 60000
         run: node bench/financial-profile.mjs
