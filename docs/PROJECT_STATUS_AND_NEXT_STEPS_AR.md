@@ -1068,10 +1068,16 @@
 
 ### حالة PR
 - PR #55: https://github.com/overurdream-collab/test4/pull/55
-- الفرع `feat/qat-link-ui` عند `8026784` إلى `main` عند `7d1ac66`.
-- حالة PR: open، غير Draft، `mergeable_state: clean`.
-- الفحوصات الثمانية كلها ناجحة، بما فيها QAT LINK UI CI وFlutter CI وSQLCipher.
-- الدمج يتم عبر PR #55 بعد نجاح الفحوصات.
+- الفرع `feat/qat-link-ui` عند `8f19ca0` إلى `main` عند `7d1ac66`.
+- حالة PR: مدموج في `0361094` بتاريخ 2026-11-05.
+- الفحوصات الثمانية على `8f19ca0` كلها ناجحة، بما فيها QAT LINK UI CI وFlutter CI وSQLCipher.
+- فحوصات `main` الست بعد الدمج كلها ناجحة:
+  - Flutter CI: Run `42087486656`
+  - QAT LINK UI CI: Run `42087486652`
+  - Ledger PostgreSQL tests: Run `42087486535`
+  - Backup/restore verification: Run `42087486520`
+  - Server financial lifecycle E2E: Run `42087486527`
+  - Two-device offline E2E: Run `42087486589`
 
 ### الحدود والمتبقي
 - التطبيق UI تجريبي ببيانات محلية وليس موصولًا بـAPI الإنتاجي أو الخادم الحقيقي.
