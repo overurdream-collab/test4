@@ -58,8 +58,14 @@ function dbCode(error: unknown): string | undefined {
     : undefined;
 }
 
-export function buildSyncApi({ pool, resolvePrincipal }: Dependencies): FastifyInstance {
-  const app = Fastify({ logger: false });
+export function buildSyncApi(deps: Dependencies): FastifyInstance {
+  return registerSyncApi(Fastify({ logger: false }), deps);
+}
+
+export function registerSyncApi(
+  app: FastifyInstance,
+  { pool, resolvePrincipal }: Dependencies
+): FastifyInstance {
   app.decorateRequest("syncPrincipal", null);
 
   app.addHook("preHandler", async (request, reply) => {
@@ -162,6 +168,115 @@ export function buildSyncApi({ pool, resolvePrincipal }: Dependencies): FastifyI
           status === 404 ? "not_found" :
           status === 409 ? "conflict" : "validation_error";
         return reply.code(status).send({ error: code });
+      }
+    }
+  );
+
+  app.get<{ Params: OperationParams; Querystring: EventsQuery }>(
+    "/v1/relationships/:relationshipId/operations",
+    {
+      schema: {
+        params: {
+          type: "object", required: ["relationshipId"],
+          properties: { relationshipId: { type: "string", format: "uuid" } }
+        },
+        querystring: {
+          type: "object", additionalProperties: false,
+          properties: {
+            after: { type: "string", pattern: "^[0-9]+$" },
+            limit: { type: "string", pattern: "^[0-9]+$" }
+          }
+        }
+      }
+    },
+    async (request, reply) => {
+      const principal = request.syncPrincipal;
+      if (!principal) return reply.code(401).send({ error: "unauthorized" });
+
+      const after = Number(request.query.after ?? "0");
+      const limit = Number(request.query.limit ?? "100");
+      if (!Number.isSafeInteger(after) || after < 0 ||
+          !Number.isSafeInteger(limit) || limit < 1 || limit > 200) {
+        return reply.code(400).send({ error: "invalid_statement_cursor" });
+      }
+
+      try {
+        const result = await pool.query<{
+          authorized: boolean;
+          operation_id: string | null;
+          actor_user_id: string | null;
+          operation_type: string | null;
+          business_state: string | null;
+          base_version: string | number | null;
+          server_version: string | number | null;
+          server_sequence: string | number | null;
+          operation_payload: Record<string, unknown> | null;
+          client_created_at: Date | string | null;
+          server_created_at: Date | string | null;
+          decision: string | null;
+          decision_reason: string | null;
+          decision_actor_id: string | null;
+          decided_at: Date | string | null;
+        }>(
+          "WITH access AS (" +
+            " SELECT EXISTS (SELECT 1 FROM ledger.relationship_members" +
+            " WHERE relationship_id=$1::uuid AND user_id=$2::uuid AND status='active') AS authorized" +
+          ") " +
+          "SELECT access.authorized, o.operation_id, o.actor_user_id, o.operation_type," +
+          " o.business_state, o.base_version, o.server_version, o.server_sequence," +
+          " o.operation_payload, o.client_created_at, o.created_at AS server_created_at," +
+          " a.decision, a.reason AS decision_reason, a.actor_user_id AS decision_actor_id," +
+          " a.decided_at" +
+          " FROM access LEFT JOIN LATERAL (" +
+            " SELECT operation_id,actor_user_id,operation_type,business_state,base_version," +
+            " server_version,server_sequence,operation_payload,client_created_at,created_at" +
+            " FROM ledger.operations WHERE relationship_id=$1::uuid AND server_sequence>$3::bigint" +
+            " ORDER BY server_sequence LIMIT ($4::integer + 1)" +
+          ") o ON access.authorized " +
+          " LEFT JOIN LATERAL (" +
+            " SELECT decision,reason,actor_user_id,decided_at FROM ledger.approvals" +
+            " WHERE relationship_id=$1::uuid AND operation_id=o.operation_id" +
+            " ORDER BY decided_at DESC LIMIT 1" +
+          ") a ON true" +
+          " ORDER BY o.server_sequence NULLS LAST",
+          [request.params.relationshipId, principal.userId, after, limit]
+        );
+
+        if (result.rows[0]?.authorized !== true) {
+          if (result.rows[0]) return reply.code(403).send({ error: "forbidden" });
+          return reply.code(404).send({ error: "not_found" });
+        }
+
+        const fetched = result.rows
+          .filter(row => row.operation_id !== null)
+          .map(row => ({
+            operationId: row.operation_id,
+            actorUserId: row.actor_user_id,
+            operationType: row.operation_type,
+            businessState: row.business_state,
+            baseVersion: Number(row.base_version ?? 0),
+            serverVersion: Number(row.server_version ?? 1),
+            serverSequence: Number(row.server_sequence ?? 0),
+            payload: row.operation_payload ?? {},
+            clientCreatedAt: row.client_created_at,
+            serverCreatedAt: row.server_created_at,
+            decision: row.decision ? {
+              decision: row.decision,
+              reason: row.decision_reason,
+              actorUserId: row.decision_actor_id,
+              decidedAt: row.decided_at
+            } : null
+          }));
+        const hasMore = fetched.length > limit;
+        const operations = fetched.slice(0, limit);
+        const nextCursor = operations.length > 0
+          ? operations[operations.length - 1]!.serverSequence
+          : after;
+
+        return reply.code(200).send({ operations, nextCursor, hasMore });
+      } catch (error) {
+        request.log.error({ err: error }, "Relationship statement lookup failed");
+        return reply.code(500).send({ error: "internal_error" });
       }
     }
   );

@@ -1,11 +1,36 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../data/api_models.dart';
+import '../data/qat_link_api.dart';
+import '../data/session_store.dart';
 import '../models.dart';
 
 class AppState extends ChangeNotifier {
-  AppState({bool seed = true}) {
+  AppState({
+    bool seed = true,
+    QatLinkApi? api,
+    QatLinkSessionStore? sessionStore,
+  }) : _api = api,
+       _sessionStore = sessionStore {
+    if (_api != null) loggedIn = false;
     if (seed) _seed();
   }
+
+  final QatLinkApi? _api;
+  final QatLinkSessionStore? _sessionStore;
+  final Map<String, String> relationshipRoles = {};
+  final Map<String, String> relationshipOtherUserIds = {};
+  bool _bootstrapped = false;
+  bool _personaInitialized = false;
+
+  bool get isRemote => _api != null;
+  bool get bootstrapped => _bootstrapped;
+  bool remoteLoading = false;
+  String? remoteError;
+  String? activeRelationshipId;
 
   static const meId = 'me';
   static const merchantId = 'merchant-me';
@@ -66,12 +91,15 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
+  String get ledgerMerchantId => isRemote ? user.id : merchantId;
+  String get ledgerCustomerId => isRemote ? user.id : meId;
+
   List<LedgerEntry> get merchantEntries =>
-      entries.where((entry) => entry.merchantId == merchantId).toList()
+      entries.where((entry) => entry.merchantId == ledgerMerchantId).toList()
         ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
   List<LedgerEntry> get customerEntries =>
-      entries.where((entry) => entry.customerId == meId).toList()
+      entries.where((entry) => entry.customerId == ledgerCustomerId).toList()
         ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
   List<LedgerEntry> entriesForCustomer(String customerId) =>
@@ -116,7 +144,7 @@ class AppState extends ChangeNotifier {
       .length;
 
   bool get canCloseCustomer => entriesForCustomer(
-    meId,
+    ledgerCustomerId,
   ).where((entry) => entry.status == TxStatus.pending).isEmpty;
 
   bool canCloseCustomerFor(String customerId) {
@@ -193,15 +221,124 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void logout() {
+  Future<void> bootstrap() async {
+    final api = _api;
+    if (api == null || _bootstrapped) return;
+    _bootstrapped = true;
+    remoteLoading = true;
+    loading = true;
+    remoteError = null;
+    notifyListeners();
+    try {
+      final stored = await _sessionStore?.read();
+      if (stored == null) {
+        loggedIn = false;
+        return;
+      }
+      api.session = stored;
+      await _loadRemoteData();
+      loggedIn = true;
+    } on ApiException catch (error) {
+      remoteError = error.toString();
+      if (error.statusCode == 401 || error.statusCode == 403) {
+        await _sessionStore?.clear();
+        api.session = null;
+        loggedIn = false;
+      }
+    } on Object catch (error) {
+      remoteError = error.toString();
+      loggedIn = false;
+    } finally {
+      remoteLoading = false;
+      loading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> requestOtp(String phone) async {
+    final api = _api;
+    if (api == null) return;
+    await api.requestOtp(normalizePhoneE164(phone));
+  }
+
+  Future<void> verifyOtp({required String phone, required String code}) async {
+    final api = _api;
+    final store = _sessionStore;
+    if (api == null) {
+      login();
+      return;
+    }
+    remoteLoading = true;
+    remoteError = null;
+    notifyListeners();
+    try {
+      final deviceId = await store?.deviceId() ?? generateUuidV4();
+      final session = await api.verifyOtp(
+        phoneE164: normalizePhoneE164(phone),
+        code: code,
+        deviceId: deviceId,
+        deviceLabel: _deviceLabel,
+        platform: _platform,
+      );
+      await store?.write(session);
+      await _loadRemoteData();
+      loggedIn = true;
+    } finally {
+      remoteLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> logout() async {
+    final api = _api;
+    if (api != null) {
+      try {
+        await api.logout();
+      } on Object catch (error) {
+        remoteError = error.toString();
+      }
+      await _sessionStore?.clear();
+      api.session = null;
+      _clearRemoteState();
+    }
     loggedIn = false;
     notifyListeners();
+  }
+
+  void _clearRemoteState() {
+    activeRelationshipId = null;
+    _personaInitialized = false;
+    persona = AppPersona.merchant;
+    remoteError = null;
+    user = const AppUser(
+      id: meId,
+      name: '',
+      phone: '',
+      storeName: '',
+      category: '',
+      address: '',
+    );
+    contacts.clear();
+    entries.clear();
+    settlementRequests.clear();
+    sessions.clear();
+    notifications.clear();
+    relationshipRoles.clear();
+    relationshipOtherUserIds.clear();
   }
 
   Future<void> refreshHome() async {
     loading = true;
     notifyListeners();
-    await Future<void>.delayed(const Duration(milliseconds: 700));
+    if (_api != null) {
+      try {
+        await _loadRemoteData();
+      } on Object catch (error) {
+        remoteError = error.toString();
+      }
+    } else {
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+    }
     loading = false;
     notifyListeners();
   }
@@ -216,9 +353,11 @@ class AppState extends ChangeNotifier {
     final customer = contactById(customerId);
     if (customer == null) return;
     final entry = LedgerEntry(
-      id: 'e-${DateTime.now().microsecondsSinceEpoch}',
+      id: isRemote
+          ? generateUuidV4()
+          : 'e-${DateTime.now().microsecondsSinceEpoch}',
       customerId: customerId,
-      merchantId: merchantId,
+      merchantId: isRemote ? user.id : merchantId,
       type: OperationType.charge,
       amountMinor: amountMinor,
       status: offline ? TxStatus.local : TxStatus.pending,
@@ -238,6 +377,9 @@ class AppState extends ChangeNotifier {
       customer.copyWith(pendingMinor: customer.pendingMinor + amountMinor),
     );
     notifyListeners();
+    if (isRemote && !offline) {
+      _fireRemote(_submitDebtRemote(entry, customerId));
+    }
   }
 
   void addSupplier({
@@ -245,6 +387,17 @@ class AppState extends ChangeNotifier {
     required String phone,
     String? storeName,
   }) {
+    if (isRemote) {
+      _fireRemote(
+        _inviteRemote(
+          name: name,
+          phone: phone,
+          kind: ContactKind.supplier,
+          storeName: storeName,
+        ),
+      );
+      return;
+    }
     final contact = Contact(
       id: 's-${DateTime.now().microsecondsSinceEpoch}',
       name: name,
@@ -263,6 +416,17 @@ class AppState extends ChangeNotifier {
     required bool hasApp,
     String? storeName,
   }) {
+    if (isRemote) {
+      _fireRemote(
+        _inviteRemote(
+          name: name,
+          phone: phone,
+          kind: ContactKind.customer,
+          storeName: storeName,
+        ),
+      );
+      return;
+    }
     final contact = Contact(
       id: 'c-${DateTime.now().microsecondsSinceEpoch}',
       name: name,
@@ -309,6 +473,9 @@ class AppState extends ChangeNotifier {
       );
     }
     notifyListeners();
+    if (isRemote) {
+      _fireRemote(_decideRemote(entries[index], 'approved'));
+    }
   }
 
   void rejectEntry(String entryId) {
@@ -335,6 +502,9 @@ class AppState extends ChangeNotifier {
       );
     }
     notifyListeners();
+    if (isRemote) {
+      _fireRemote(_decideRemote(entries[index], 'rejected'));
+    }
   }
 
   void requestEdit(String entryId, int proposedAmountMinor, String note) {
@@ -422,8 +592,10 @@ class AppState extends ChangeNotifier {
     final merchant = contactById(merchantContactId);
     if (merchant == null) return;
     final entry = LedgerEntry(
-      id: 'p-${DateTime.now().microsecondsSinceEpoch}',
-      customerId: meId,
+      id: isRemote
+          ? generateUuidV4()
+          : 'p-${DateTime.now().microsecondsSinceEpoch}',
+      customerId: isRemote ? user.id : meId,
       merchantId: merchantContactId,
       type: OperationType.payment,
       amountMinor: amountMinor,
@@ -445,10 +617,17 @@ class AppState extends ChangeNotifier {
       merchant.copyWith(pendingMinor: merchant.pendingMinor + amountMinor),
     );
     notifyListeners();
+    if (isRemote && !offline) {
+      _fireRemote(_submitPaymentRemote(entry, merchantContactId));
+    }
   }
 
   void requestSettlement(String merchantContactId) {
     if (hasSettlementToday(merchantContactId)) return;
+    if (isRemote) {
+      _fireRemote(_requestSettlementRemote(merchantContactId));
+      return;
+    }
     settlementRequests.add(
       SettlementRequest(
         id: '$merchantContactId:${DateTime.now().microsecondsSinceEpoch}',
@@ -471,8 +650,14 @@ class AppState extends ChangeNotifier {
       createdAt: request.createdAt,
       status: SettlementStatus.approved,
       note: request.note,
+      serverId: request.serverId,
     );
     notifyListeners();
+    if (isRemote) {
+      _fireRemote(
+        _decideSettlementRemote(settlementRequests[index], 'approved'),
+      );
+    }
   }
 
   void addPhoto(String title, String audience) {
@@ -535,14 +720,31 @@ class AppState extends ChangeNotifier {
   void revokeSession(String id) {
     sessions.removeWhere((session) => session.id == id);
     notifyListeners();
+    if (isRemote) {
+      _fireRemote(_revokeRemoteDevice(id).then((_) => refreshHome()));
+    }
   }
 
   void revokeOtherSessions() {
     final current = sessions.where((session) => session.current).toList();
+    final removed = sessions.where((session) => !session.current).toList();
     sessions
       ..clear()
       ..addAll(current);
     notifyListeners();
+    if (isRemote) {
+      _fireRemote(
+        Future.wait(
+          removed.map((item) => _revokeRemoteDevice(item.id)),
+        ).then((_) => refreshHome()),
+      );
+    }
+  }
+
+  Future<void> _revokeRemoteDevice(String deviceId) async {
+    final api = _api;
+    if (api == null) return;
+    await api.revokeDevice(deviceId);
   }
 
   void selectPlan(int index) {
@@ -553,6 +755,459 @@ class AppState extends ChangeNotifier {
   void requestReset() {
     resetUnlocked = true;
     notifyListeners();
+  }
+
+  Future<void> _loadRemoteData() async {
+    final api = _api;
+    if (api == null) return;
+    final remoteUser = await api.me();
+    final displayName = remoteUser.displayName?.trim();
+    user = AppUser(
+      id: remoteUser.id,
+      name: displayName == null || displayName.isEmpty
+          ? remoteUser.phoneE164
+          : displayName,
+      phone: remoteUser.phoneE164,
+      storeName: displayName ?? '',
+      category: 'علاقة تجارية موثقة',
+      address: '',
+    );
+
+    final relationships = await api.relationships();
+    final devices = await api.devices();
+    final invitations = await api.invitations();
+
+    contacts.clear();
+    entries.clear();
+    settlementRequests.clear();
+    sessions.clear();
+    notifications.clear();
+    relationshipRoles.clear();
+    relationshipOtherUserIds.clear();
+
+    for (final relationship in relationships) {
+      final other = relationship.otherParty;
+      if (other == null) continue;
+      final cycles = await api.accountCycles(relationship.relationshipId);
+      final operations = await api.operations(relationship.relationshipId);
+      final cycle = cycles.currentCycle;
+      var balance = 0;
+      if (cycle != null) {
+        for (final item in cycle.balances) {
+          if (item.ownerUserId == remoteUser.id) {
+            balance = item.partyBalanceMinor;
+            break;
+          }
+        }
+      }
+      final pending = operations
+          .where(
+            (operation) => operation.businessState == 'awaiting_counterparty',
+          )
+          .fold<int>(
+            0,
+            (total, operation) => total + _operationAmount(operation),
+          );
+
+      relationshipRoles[relationship.relationshipId] = relationship.myRole;
+      relationshipOtherUserIds[relationship.relationshipId] = other.userId;
+      activeRelationshipId ??= relationship.relationshipId;
+
+      contacts.add(
+        Contact(
+          id: relationship.relationshipId,
+          name: other.displayName?.trim().isNotEmpty == true
+              ? other.displayName!.trim()
+              : (other.phoneE164 ?? 'طرف العلاقة'),
+          phone: other.phoneE164 ?? '',
+          kind: _contactKindForRole(relationship.myRole),
+          storeName: other.displayName?.trim() ?? '',
+          balanceMinor: balance,
+          pendingMinor: pending,
+          favorite: contacts.isEmpty,
+          hasApp: true,
+        ),
+      );
+
+      for (final operation in operations) {
+        entries.add(
+          _entryFromRemote(
+            operation,
+            relationship.myRole,
+            relationship.relationshipId,
+          ),
+        );
+      }
+
+      final settlement = await api.pendingSettlement(
+        relationship.relationshipId,
+      );
+      if (settlement != null) {
+        final fromMe = settlement.requestedByUserId == remoteUser.id;
+        settlementRequests.add(
+          SettlementRequest(
+            id: '${relationship.relationshipId}:${settlement.requestId}',
+            createdAt: settlement.requestedAt ?? DateTime.now(),
+            status: SettlementStatus.pending,
+            note: fromMe
+                ? 'طلبك بانتظار موافقة الطرف الآخر'
+                : 'طلب سداد من الطرف الآخر',
+            serverId: settlement.requestId,
+          ),
+        );
+      }
+    }
+
+    sessions.addAll(
+      devices.map(
+        (device) => DeviceSession(
+          id: device.id,
+          name: device.label,
+          platform: device.platform,
+          lastActive:
+              device.lastSeenAt ?? device.registeredAt ?? DateTime.now(),
+          location: device.isCurrent ? 'هذا الجهاز' : 'جهاز موثّق',
+          current: device.isCurrent,
+        ),
+      ),
+    );
+
+    for (final invitation in invitations) {
+      notifications.add(
+        AppNotification(
+          id: invitation.invitationId,
+          title: 'دعوة علاقة بانتظار قرارك',
+          body: invitation.inviterDisplayName ?? invitation.inviterUserId,
+          kind: NotificationKind.app,
+          at: DateTime.now(),
+        ),
+      );
+    }
+
+    if (!_personaInitialized && relationships.isNotEmpty) {
+      persona =
+          relationships.any(
+            (relationship) =>
+                relationship.myRole == 'merchant' ||
+                relationship.myRole == 'supplier',
+          )
+          ? AppPersona.merchant
+          : AppPersona.customer;
+      _personaInitialized = true;
+    }
+    notifyListeners();
+  }
+
+  ContactKind _contactKindForRole(String role) {
+    if (role == 'merchant' || role == 'supplier') return ContactKind.customer;
+    if (role == 'buyer') return ContactKind.supplier;
+    return ContactKind.merchant;
+  }
+
+  LedgerEntry _entryFromRemote(
+    RemoteOperation operation,
+    String myRole,
+    String relationshipId,
+  ) {
+    final sellerSide = myRole == 'merchant' || myRole == 'supplier';
+    final createdByMe = operation.actorUserId == user.id;
+    final amount = _operationAmount(operation);
+    final decision = operation.decision;
+    final history = <TxEvent>[];
+    if (decision != null) {
+      history.add(
+        TxEvent(
+          label: decision.decision == 'approved'
+              ? 'اعتمدها الطرف الآخر'
+              : 'رفضها الطرف الآخر',
+          at: decision.decidedAt ?? operation.serverCreatedAt ?? DateTime.now(),
+          note: decision.reason,
+        ),
+      );
+    } else {
+      history.add(
+        TxEvent(
+          label: createdByMe ? 'أرسلت للموافقة' : 'بانتظار موافقتك',
+          at:
+              operation.clientCreatedAt ??
+              operation.serverCreatedAt ??
+              DateTime.now(),
+        ),
+      );
+    }
+    return LedgerEntry(
+      id: operation.operationId,
+      customerId: sellerSide ? relationshipId : user.id,
+      merchantId: sellerSide ? user.id : relationshipId,
+      type: _operationType(operation.operationType),
+      amountMinor: amount,
+      status: _txStatus(operation.businessState),
+      createdAt:
+          operation.clientCreatedAt ??
+          operation.serverCreatedAt ??
+          DateTime.now(),
+      note: (operation.payload['note'] ?? operation.payload['reason'])
+          ?.toString(),
+      productName:
+          (operation.payload['productName'] ?? operation.payload['description'])
+              ?.toString(),
+      createdByMe: createdByMe,
+      photoCount: _intValue(operation.payload['photoCount']),
+      history: history,
+      serverVersion: operation.serverVersion,
+    );
+  }
+
+  OperationType _operationType(String value) {
+    return switch (value) {
+      'payment' => OperationType.payment,
+      'sales_return' => OperationType.salesReturn,
+      'refund' => OperationType.refund,
+      'reversal' => OperationType.reversal,
+      'allocation' => OperationType.allocation,
+      'credit_application' => OperationType.creditApplication,
+      _ => OperationType.charge,
+    };
+  }
+
+  TxStatus _txStatus(String value) {
+    return switch (value) {
+      'approved' => TxStatus.approved,
+      'rejected' => TxStatus.rejected,
+      _ => TxStatus.pending,
+    };
+  }
+
+  int _operationAmount(RemoteOperation operation) =>
+      _intValue(operation.payload['amountMinor']);
+
+  int _intValue(Object? value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value) ?? 0;
+    return 0;
+  }
+
+  String _relationshipForEntry(LedgerEntry entry) {
+    return entry.customerId == user.id ? entry.merchantId : entry.customerId;
+  }
+
+  void _fireRemote(Future<void> future) {
+    unawaited(
+      future.catchError((Object error) {
+        remoteError = error.toString();
+        notifyListeners();
+      }),
+    );
+  }
+
+  Future<void> _submitDebtRemote(
+    LedgerEntry entry,
+    String relationshipId,
+  ) async {
+    final api = _api;
+    final debtor = relationshipOtherUserIds[relationshipId];
+    if (api == null || debtor == null) return;
+    try {
+      final result = await api.submitOperation(
+        relationshipId: relationshipId,
+        operationId: entry.id,
+        operationType: 'credit_charge',
+        payload: {
+          'creditorUserId': user.id,
+          'debtorUserId': debtor,
+          'currency': 'YER',
+          'amountMinor': entry.amountMinor,
+          if (entry.productName != null) 'productName': entry.productName,
+          if (entry.note != null) 'note': entry.note,
+        },
+      );
+      final index = entries.indexWhere((item) => item.id == entry.id);
+      if (index != -1) {
+        entries[index] = entries[index].copyWith(
+          status: TxStatus.pending,
+          serverVersion: result.serverVersion,
+        );
+      }
+      await _loadRemoteData();
+    } on Object catch (error) {
+      final index = entries.indexWhere((item) => item.id == entry.id);
+      if (index != -1) {
+        entries[index] = entries[index].copyWith(status: TxStatus.local);
+      }
+      remoteError = error.toString();
+      notifyListeners();
+    }
+  }
+
+  Future<void> _submitPaymentRemote(
+    LedgerEntry entry,
+    String relationshipId,
+  ) async {
+    final api = _api;
+    final payee = relationshipOtherUserIds[relationshipId];
+    if (api == null || payee == null) return;
+    try {
+      final result = await api.submitOperation(
+        relationshipId: relationshipId,
+        operationId: entry.id,
+        operationType: 'payment',
+        payload: {
+          'payerUserId': user.id,
+          'payeeUserId': payee,
+          'currency': 'YER',
+          'amountMinor': entry.amountMinor,
+          if (entry.note != null) 'note': entry.note,
+        },
+      );
+      final index = entries.indexWhere((item) => item.id == entry.id);
+      if (index != -1) {
+        entries[index] = entries[index].copyWith(
+          status: TxStatus.pending,
+          serverVersion: result.serverVersion,
+        );
+      }
+      await _loadRemoteData();
+    } on Object catch (error) {
+      final index = entries.indexWhere((item) => item.id == entry.id);
+      if (index != -1) {
+        entries[index] = entries[index].copyWith(status: TxStatus.local);
+      }
+      remoteError = error.toString();
+      notifyListeners();
+    }
+  }
+
+  Future<void> _decideRemote(LedgerEntry entry, String decision) async {
+    final api = _api;
+    if (api == null) return;
+    try {
+      await api.decideOperation(
+        relationshipId: _relationshipForEntry(entry),
+        operationId: entry.id,
+        decision: decision,
+        expectedVersion: entry.serverVersion,
+        idempotencyKey: generateUuidV4(),
+      );
+      await _loadRemoteData();
+    } on Object catch (error) {
+      remoteError = error.toString();
+      await refreshHome();
+    }
+  }
+
+  Future<void> _requestSettlementRemote(String relationshipId) async {
+    final api = _api;
+    if (api == null) return;
+    final localId = '$relationshipId:${DateTime.now().microsecondsSinceEpoch}';
+    settlementRequests.add(
+      SettlementRequest(
+        id: localId,
+        createdAt: DateTime.now(),
+        status: SettlementStatus.pending,
+        note: 'طلب سداد يومي',
+      ),
+    );
+    notifyListeners();
+    try {
+      final requestId = await api.requestSettlement(
+        relationshipId: relationshipId,
+        idempotencyKey: generateUuidV4(),
+      );
+      final index = settlementRequests.indexWhere((item) => item.id == localId);
+      if (index != -1) {
+        final previous = settlementRequests[index];
+        settlementRequests[index] = SettlementRequest(
+          id: previous.id,
+          createdAt: previous.createdAt,
+          status: previous.status,
+          note: previous.note,
+          serverId: requestId,
+        );
+      }
+      await _loadRemoteData();
+    } on Object catch (error) {
+      settlementRequests.removeWhere((item) => item.id == localId);
+      remoteError = error.toString();
+      notifyListeners();
+    }
+  }
+
+  Future<void> _decideSettlementRemote(
+    SettlementRequest request,
+    String decision,
+  ) async {
+    final api = _api;
+    final requestId = request.serverId;
+    if (api == null || requestId == null) return;
+    final relationshipId = request.id.split(':').first;
+    try {
+      await api.decideSettlement(
+        relationshipId: relationshipId,
+        requestId: requestId,
+        decision: decision,
+        idempotencyKey: generateUuidV4(),
+      );
+      await _loadRemoteData();
+    } on Object catch (error) {
+      remoteError = error.toString();
+      await refreshHome();
+    }
+  }
+
+  Future<void> _inviteRemote({
+    required String name,
+    required String phone,
+    required ContactKind kind,
+    String? storeName,
+  }) async {
+    final api = _api;
+    if (api == null) return;
+    final isSupplier = kind == ContactKind.supplier;
+    try {
+      final created = await api.inviteRelationship(
+        inviteePhoneE164: normalizePhoneE164(phone),
+        relationshipType: isSupplier ? 'supplier_buyer' : 'merchant_customer',
+        myRole: isSupplier ? 'buyer' : 'merchant',
+        idempotencyKey: generateUuidV4(),
+      );
+      contacts.add(
+        Contact(
+          id: created.relationshipId,
+          name: storeName?.trim().isNotEmpty == true ? storeName!.trim() : name,
+          phone: phone,
+          kind: kind,
+          storeName: storeName ?? '',
+        ),
+      );
+      relationshipRoles[created.relationshipId] = isSupplier
+          ? 'buyer'
+          : 'merchant';
+      notifyListeners();
+    } on Object catch (error) {
+      remoteError = error.toString();
+      notifyListeners();
+    }
+  }
+
+  String get _deviceLabel {
+    if (kIsWeb) return 'متصفح QAT LINK';
+    return switch (defaultTargetPlatform) {
+      TargetPlatform.android => 'جهاز Android',
+      TargetPlatform.iOS => 'جهاز iPhone',
+      TargetPlatform.windows => 'QAT LINK على Windows',
+      TargetPlatform.macOS => 'QAT LINK على macOS',
+      TargetPlatform.linux => 'QAT LINK على Linux',
+      TargetPlatform.fuchsia => 'جهاز Fuchsia',
+    };
+  }
+
+  String get _platform {
+    if (kIsWeb) return 'web';
+    return switch (defaultTargetPlatform) {
+      TargetPlatform.iOS => 'ios',
+      _ => 'android',
+    };
   }
 
   void _replaceContact(Contact previous, Contact next) {

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
@@ -18,6 +20,12 @@ class QatLinkApp extends StatefulWidget {
 
 class _QatLinkAppState extends State<QatLinkApp> {
   late final AppState _state = widget.state ?? AppState();
+
+  @override
+  void initState() {
+    super.initState();
+    if (_state.isRemote) unawaited(_state.bootstrap());
+  }
 
   @override
   void dispose() {

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../config/app_config.dart';
+import '../../data/api_models.dart';
 import '../../design/components.dart';
 import '../../design/tokens.dart';
 
@@ -11,10 +13,18 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  final _phoneController = TextEditingController(text: '+967 770 123 456');
+  late final TextEditingController _phoneController;
   final _otpController = TextEditingController();
   int _step = 0;
   bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _phoneController = TextEditingController(
+      text: AppConfig.useDemoData ? '+967 770 123 456' : '',
+    );
+  }
 
   @override
   void dispose() {
@@ -24,28 +34,86 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _sendCode() async {
-    if (_phoneController.text.trim().length < 8) {
+    final phone = _phoneController.text.trim();
+    if (phone.length < 8) {
       QToast.show(context, 'أدخل رقم جوال صحيح', error: true);
       return;
     }
+    final state = QScope.of(context);
     setState(() => _busy = true);
-    await Future<void>.delayed(const Duration(milliseconds: 550));
-    if (!mounted) return;
-    setState(() {
-      _busy = false;
-      _step = 1;
-    });
+    try {
+      if (state.isRemote) {
+        await state.requestOtp(phone);
+      } else {
+        await Future<void>.delayed(const Duration(milliseconds: 550));
+      }
+      if (!mounted) return;
+      setState(() => _step = 1);
+    } on ApiException catch (error) {
+      if (mounted) QToast.show(context, _message(error), error: true);
+    } on Object {
+      if (mounted) {
+        QToast.show(
+          context,
+          'تعذر الاتصال بالخادم. تحقق من الشبكة.',
+          error: true,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _verify() async {
-    if (_otpController.text.trim().length < 4) {
-      QToast.show(context, 'أدخل رمز التحقق', error: true);
+    final code = _otpController.text.trim();
+    final state = QScope.of(context);
+    final minimum = state.isRemote ? 6 : 4;
+    if (code.length < minimum) {
+      QToast.show(
+        context,
+        state.isRemote
+            ? 'أدخل رمز التحقق المكوّن من 6 أرقام'
+            : 'أدخل رمز التحقق',
+        error: true,
+      );
       return;
     }
     setState(() => _busy = true);
-    await Future<void>.delayed(const Duration(milliseconds: 650));
-    if (!mounted) return;
-    QScope.of(context).login();
+    try {
+      if (state.isRemote) {
+        await state.verifyOtp(phone: _phoneController.text, code: code);
+      } else {
+        await Future<void>.delayed(const Duration(milliseconds: 650));
+        if (!mounted) return;
+        state.login();
+      }
+    } on ApiException catch (error) {
+      if (mounted) QToast.show(context, _message(error), error: true);
+    } on Object {
+      if (mounted) {
+        QToast.show(
+          context,
+          'تعذر الاتصال بالخادم. تحقق من الشبكة.',
+          error: true,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  String _message(ApiException error) {
+    return switch (error.code) {
+      'invalid_or_expired_otp' => 'رمز التحقق غير صحيح أو منتهي الصلاحية.',
+      'invalid_phone' => 'رقم الجوال غير صحيح.',
+      'rate_limited' => 'محاولات كثيرة. انتظر قليلاً ثم أعد المحاولة.',
+      'device_unavailable' => 'تعذر تسجيل هذا الجهاز. جرّب جهازاً آخر.',
+      'account_suspended' => 'الحساب موقوف. تواصل مع الدعم.',
+      _ =>
+        error.statusCode >= 500
+            ? 'الخادم غير متاح حالياً. أعد المحاولة.'
+            : 'تعذر إكمال الطلب (${error.code}).',
+    };
   }
 
   @override
@@ -126,10 +194,11 @@ class _LoginScreenState extends State<LoginScreen> {
                     spacing: QSpace.lg,
                     runSpacing: QSpace.sm,
                     children: [
-                      TextButton(
-                        onPressed: () => QScope.of(context).login(),
-                        child: const Text('دخول تجريبي سريع'),
-                      ),
+                      if (!QScope.of(context).isRemote)
+                        TextButton(
+                          onPressed: () => QScope.of(context).login(),
+                          child: const Text('دخول تجريبي سريع'),
+                        ),
                       TextButton(
                         onPressed: () {},
                         child: const Text('الشروط والخصوصية'),
@@ -222,13 +291,15 @@ class _LoginScreenState extends State<LoginScreen> {
           icon: Icons.check_rounded,
           onPressed: _busy ? null : _verify,
         ),
-        const SizedBox(height: QSpace.sm),
-        Center(
-          child: Text(
-            'رمز تجريبي: أي 4 أرقام أو أكثر',
-            style: Theme.of(context).textTheme.labelSmall,
+        if (!QScope.of(context).isRemote) ...[
+          const SizedBox(height: QSpace.sm),
+          Center(
+            child: Text(
+              'رمز تجريبي: أي 4 أرقام أو أكثر',
+              style: Theme.of(context).textTheme.labelSmall,
+            ),
           ),
-        ),
+        ],
       ],
     );
   }

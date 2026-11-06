@@ -139,6 +139,7 @@ class LedgerEntry {
     this.photoCount = 0,
     this.history = const [],
     this.proposedAmountMinor,
+    this.serverVersion = 0,
   });
 
   final String id;
@@ -154,6 +155,7 @@ class LedgerEntry {
   final int photoCount;
   final List<TxEvent> history;
   final int? proposedAmountMinor;
+  final int serverVersion;
 
   LedgerEntry copyWith({
     TxStatus? status,
@@ -161,6 +163,7 @@ class LedgerEntry {
     int? photoCount,
     int? proposedAmountMinor,
     bool clearProposedAmount = false,
+    int? serverVersion,
   }) {
     return LedgerEntry(
       id: id,
@@ -178,6 +181,7 @@ class LedgerEntry {
       proposedAmountMinor: clearProposedAmount
           ? null
           : (proposedAmountMinor ?? this.proposedAmountMinor),
+      serverVersion: serverVersion ?? this.serverVersion,
     );
   }
 }
@@ -300,12 +304,14 @@ class SettlementRequest {
     required this.createdAt,
     required this.status,
     this.note,
+    this.serverId,
   });
 
   final String id;
   final DateTime createdAt;
   final SettlementStatus status;
   final String? note;
+  final String? serverId;
 }
 
 class BrandConcept {

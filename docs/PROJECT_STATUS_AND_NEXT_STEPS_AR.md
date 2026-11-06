@@ -1,9 +1,9 @@
 # حالة المشروع وخطة العمل — دفتر الحسابات التجارية المشترك
 
-**آخر تحديث:** 2026-11-02 — PRD 2.0 / الحزمة 0 مدمجة  
+**آخر تحديث:** 2026-11-06 — فرع الإصدار `feat/qat-link-release` قيد التحقق والدمج
 **المستودع:** https://github.com/overurdream-collab/test4  
 **الفرع الأساسي:** main  
-**آخر merge على main:** 4698d0402f98cd49684c2d9f5e6b7f6551964d08
+**آخر merge على main:** 3fc85ff0ff6ed05da9877fb954a4703da4efe6f1
 
 ## 1. الخلاصة التنفيذية
 
@@ -1085,3 +1085,48 @@
 - الصور المرجعية 01–13 لم تُرفق، لذلك اتبع التنفيذ وثيقة الهوية النصية فقط.
 - لا نشر ولا قاعدة إنتاجية ولا خدمة مدفوعة.
 - البوابة التالية: إنشاء PR ودمجه بعد CI، ثم إضافة platform scaffolding وربط التطبيق بالـAPI والتحقق على محاكي/جهاز فعلي.
+
+## الخطوة 11 — فرع الإصدار وربط API ومنصات النشر / 2026-11-06
+
+### التنفيذ
+- الفرع: `feat/qat-link-release`، مبني على `main` عند `3fc85ff`.
+- أضيفت منصات Android/iOS/Web لتطبيق `mobile/qat_link`:
+  - Android: `applicationId` و`namespace` هما `ye.qatlink.app`، و`INTERNET`، و`MainActivity` في المسار الصحيح.
+  - iOS: bundle `ye.qatlink.app`، أوصاف الكاميرا/الصور، وتعريب `ar/en`.
+  - Web: manifest وtheme color وmeta عربية.
+- أضيفت أيقونات العلامة إلى mipmap في Android و`AppIcon.appiconset` في iOS و`web/icons` و`favicon`، وأزيلت أيقونات Flutter الافتراضية وملفات `Zone.Identifier`.
+- أضيفت طبقة بيانات حقيقية في `mobile/qat_link/lib/src/data/`:
+  - `QatLinkApi`: OTP، refresh-on-401 مرة واحدة، `/v1/me`، العلاقات، دورات الحساب، العمليات المرقّمة، إرسال/اعتماد العملية، التسوية، الأجهزة، الدعوات، الخروج.
+  - `SecureQatLinkSessionStore` و`MemoryQatLinkSessionStore` وdevice ID وUUID.
+  - `normalizePhoneE164` مع افتراضي `+967`.
+- رُبط `AppState` بوضع remote:
+  - bootstrap من الجلسة المحفوظة، تسجيل OTP، تحميل العلاقات والأرصدة والعمليات والأجهزة والدعوات وطلبات التسوية.
+  - تنفيذ remote لإضافة الدين/الدفعة، اعتماد/رفض العملية، طلب/اعتماد التسوية، دعوة علاقة، وإلغاء جهاز.
+  - إصلاح هوية الطرف في التصفية عبر `ledgerMerchantId`/`ledgerCustomerId` بدل `merchantId`/`meId` الثابتين.
+  - تنظيف حالة المستخدم والعلاقات والأجهزة عند تسجيل الخروج remote، مع إعادة تعيين persona.
+- رُبطت شاشة الدخول بالـOTP الحقيقي، وأُخفيت بيانات الدخول التجريبية عند تفعيل remote.
+- أضيف `server/src/server.ts`:
+  - env validation، CORS، `/health`، graceful shutdown، OTP console للتطوير وwebhook للإنتاج.
+  - تسجيل وحدات API داخل Fastify plugins معزولة عبر `registerIdentityApi` و`registerSyncApi` و`registerApprovalApi` و`registerAdminApi`.
+- أضيف `GET /v1/relationships/:relationshipId/operations` لكشف العملية في التطبيق، مع اختبارات نجاح/رفض عضوية/cursor غير صالح.
+- أضيفت لوحة إدارة Web مستقلة في `admin_web/`:
+  - تسجيل OTP، تجديد الجلسة، `/v1/me`، عرض/تبديل `sales-returns` فقط.
+  - الجلسة في `sessionStorage`، device ID في `localStorage`، ورسالة نطاق صريحة: إدارة المستخدمين والعلاقات والتقارير غير متاحة بعد لعدم وجود endpoints خادم.
+- أضيفت إلى `.github/workflows/qat-link-ui.yml` خطوة `flutter build web --release` ومهمة `admin-web` تشغّل `node --check`.
+
+### التحقق المحلي الفعلي
+- Flutter: `dart format` (0 changed)، `flutter analyze` (`No issues found`)، `flutter test` (`19/19` passed)، و`flutter build web --release` ناجح.
+- Server: `tsc` emit ناجح، ثم `node --test` لكل ملفات الاختبار المترجمة: `62/62` passed.
+- Admin: `node --check admin_web/app.js` ناجح.
+- بيئة التحقق: Windows Node `v24.18.1`؛ Flutter `3.44.6` وDart `3.12.2`.
+- ملاحظة تشغيلية: اختبار Flutter من مسار WSL/UNC يتوقف عند `objective_c.lock`؛ نُفذ من نسخة `C:\temp\qat_link_verify`. اختبارات الخادم نُفذت من نسخة `C:\temp\qat_link_server_verify` لتجنب تعارض `esbuild` Linux/Windows.
+- تحذيرات build web غير مانعة: `flutter_secure_storage_web` غير متوافق مع Wasm، وخط `CupertinoIcons` غير مضمّن.
+
+### المتبقي قبل الإطلاق
+- الفرع لم يُرفع/يُدمج بعد؛ فحوصات CI على PR و`main` مطلوبة قبل أي إعلان نجاح.
+- مزود OTP الإنتاجي وwebhook وبياناته السرية غير متوفرة.
+- عنوان API الإنتاجي، keystore أندرويد، توقيع Apple، وموافقة النشر غير متوفرة.
+- لا يمكن بناء/اختبار iOS على Linux؛ يلزم macOS/Xcode.
+- الصور المرجعية `01–13` غير مرفقة؛ مطابقة بصرية كاملة غير مثبتة.
+- لوحة الإدارة محدودة بخدمة `sales-returns` فقط لعدم وجود endpoints للإدارة.
+- طلب التعديل في وضع remote ما زال محليًا، وقبول/رفض الدعوات والصور والاشتراكات والموظفين والإشعارات غير مربوطة بخادم.
