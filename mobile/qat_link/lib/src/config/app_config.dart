@@ -10,8 +10,13 @@ class AppConfig {
     'QATLINK_ALLOW_DEMO',
     defaultValue: false,
   );
+  static const String uatOtpCode = String.fromEnvironment(
+    'QATLINK_UAT_OTP',
+    defaultValue: '',
+  );
 
   static bool get hasRemoteApi => apiBaseUrl.trim().isNotEmpty;
+  static bool get hasUatOtp => RegExp(r'^\d{6}$').hasMatch(uatOtpCode);
   static bool get useDemoData => !hasRemoteApi;
 
   static Uri? get apiBaseUri {

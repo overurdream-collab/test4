@@ -78,6 +78,16 @@ class _LoginScreenState extends State<LoginScreen> {
       );
       return;
     }
+    if (!state.isRemote &&
+        AppConfig.hasUatOtp &&
+        code != AppConfig.uatOtpCode) {
+      QToast.show(
+        context,
+        'رمز UAT غير صحيح. استخدم الرمز المعروض.',
+        error: true,
+      );
+      return;
+    }
     setState(() => _busy = true);
     try {
       if (state.isRemote) {
@@ -291,7 +301,18 @@ class _LoginScreenState extends State<LoginScreen> {
           icon: Icons.check_rounded,
           onPressed: _busy ? null : _verify,
         ),
-        if (!QScope.of(context).isRemote) ...[
+        if (AppConfig.hasUatOtp) ...[
+          const SizedBox(height: QSpace.sm),
+          Center(
+            child: Text(
+              'وضع UAT — رمز الدخول الثابت: ${AppConfig.uatOtpCode}',
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: QColors.brightGreen,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ] else if (!QScope.of(context).isRemote) ...[
           const SizedBox(height: QSpace.sm),
           Center(
             child: Text(
