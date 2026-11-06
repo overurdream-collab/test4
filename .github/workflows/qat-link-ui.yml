@@ -24,3 +24,15 @@ jobs:
         run: flutter analyze
       - name: Unit and widget tests
         run: flutter test
+      - name: Build release web
+        run: flutter build web --release
+
+  admin-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check admin console JavaScript
+        run: node --check admin_web/app.js

@@ -53,11 +53,14 @@ function statusForDatabaseError(code: string | undefined): number {
   }
 }
 
-export function buildApprovalApi({
+export function buildApprovalApi(deps: Dependencies): FastifyInstance {
+  return registerApprovalApi(Fastify({ logger: false }), deps);
+}
+
+export function registerApprovalApi(app: FastifyInstance, {
   pool,
   resolvePrincipal
 }: Dependencies): FastifyInstance {
-  const app = Fastify({ logger: false });
   app.decorateRequest("principal", null);
 
   app.addHook("preHandler", async (request, reply) => {

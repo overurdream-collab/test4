@@ -161,3 +161,72 @@ test("a revoked device receives 403 and its unsent outbox operation is not accep
   assert.equal(calls, 0);
   await app.close();
 });
+
+test("statement returns ordered operations with actor, version and decision", async () => {
+  const app = buildSyncApi({
+    pool: makePool(async () => ({
+      rows: [{
+        authorized: true,
+        operation_id: operationId,
+        actor_user_id: userId,
+        operation_type: "credit_charge",
+        business_state: "approved",
+        base_version: 0,
+        server_version: 2,
+        server_sequence: 4,
+        operation_payload: { currency: "YER", amountMinor: 1500 },
+        client_created_at: "2026-11-02T00:00:00.000Z",
+        server_created_at: "2026-11-02T00:00:01.000Z",
+        decision: "approved",
+        decision_reason: "accepted",
+        decision_actor_id: userId,
+        decided_at: "2026-11-02T00:00:02.000Z"
+      }]
+    })),
+    resolvePrincipal: async () => ({ userId, deviceId })
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/relationships/" + relationshipId + "/operations?after=0&limit=50"
+  });
+  assert.equal(response.statusCode, 200, response.body);
+  const body = JSON.parse(response.body);
+  assert.equal(body.operations.length, 1);
+  assert.equal(body.operations[0].operationId, operationId);
+  assert.equal(body.operations[0].actorUserId, userId);
+  assert.equal(body.operations[0].serverVersion, 2);
+  assert.equal(body.operations[0].serverSequence, 4);
+  assert.equal(body.operations[0].decision.decision, "approved");
+  assert.equal(body.nextCursor, 4);
+  assert.equal(body.hasMore, false);
+  await app.close();
+});
+
+test("statement denies a principal without relationship membership", async () => {
+  const app = buildSyncApi({
+    pool: makePool(async () => ({ rows: [{ authorized: false }] })),
+    resolvePrincipal: async () => ({ userId, deviceId })
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/relationships/" + relationshipId + "/operations?after=0&limit=50"
+  });
+  assert.equal(response.statusCode, 403, response.body);
+  await app.close();
+});
+
+test("statement rejects invalid cursors", async () => {
+  const app = buildSyncApi({
+    pool: makePool(async () => ({ rows: [] })),
+    resolvePrincipal: async () => ({ userId, deviceId })
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/relationships/" + relationshipId + "/operations?after=-1&limit=9999"
+  });
+  assert.equal(response.statusCode, 400);
+  await app.close();
+});

@@ -28,8 +28,14 @@ function databaseCode(error: unknown): string | undefined {
     : undefined;
 }
 
-export function buildAdminApi({ pool, resolvePrincipal }: Dependencies): FastifyInstance {
-  const app = Fastify({ logger: false });
+export function buildAdminApi(deps: Dependencies): FastifyInstance {
+  return registerAdminApi(Fastify({ logger: false }), deps);
+}
+
+export function registerAdminApi(
+  app: FastifyInstance,
+  { pool, resolvePrincipal }: Dependencies
+): FastifyInstance {
   app.decorateRequest("adminPrincipal", null);
 
   app.addHook("preHandler", async (request, reply) => {

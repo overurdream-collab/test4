@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#12C85A">
+  <title>QAT LINK • لوحة الإدارة</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main id="login-view" class="auth-shell">
+    <section class="auth-card">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 512 512" role="img">
+          <defs>
+            <linearGradient id="brand" x1="64" y1="32" x2="448" y2="480" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#12C85A"/><stop offset=".55" stop-color="#32E875"/><stop offset="1" stop-color="#70F5A4"/>
+            </linearGradient>
+          </defs>
+          <rect width="512" height="512" rx="116" fill="url(#brand)"/>
+          <path d="M256 94c-66 34-106 78-106 133 0 52 40 94 94 94 19 0 37-5 52-15-27-15-45-45-45-78 0-31 16-58 41-74-7-31-19-57-36-60Z" fill="#fff" opacity=".96"/>
+          <path d="M256 418c66-34 106-78 106-133 0-52-40-94-94-94-19 0-37 5-52 15 27 15 45 45 45 78 0 31-16 58-41 74 7 31 19 57 36 60Z" fill="#26352D" opacity=".9"/>
+          <rect x="236" y="182" width="40" height="148" rx="20" fill="#26352D" opacity=".72"/>
+          <circle cx="256" cy="168" r="20" fill="#26352D" opacity=".72"/>
+          <circle cx="256" cy="344" r="20" fill="#26352D" opacity=".72"/>
+        </svg>
+      </div>
+      <p class="eyebrow">QAT LINK</p>
+      <h1>لوحة الإدارة</h1>
+      <p class="lede">دخول آمن للمشرفين عبر رمز التحقق. لا تشارك الرمز مع أي شخص.</p>
+
+      <form id="otp-form" class="form">
+        <label for="api-url">عنوان الخادم</label>
+        <input id="api-url" type="url" inputmode="url" dir="ltr" placeholder="https://api.example.com" autocomplete="url" required>
+
+        <div id="phone-step">
+          <label for="phone">رقم الجوال الإداري</label>
+          <input id="phone" type="tel" inputmode="tel" dir="ltr" placeholder="+967 7xx xxx xxx" autocomplete="tel" required>
+          <button id="request-otp" class="primary" type="submit">إرسال رمز التحقق</button>
+        </div>
+
+        <div id="otp-step" hidden>
+          <label for="otp">رمز التحقق</label>
+          <input id="otp" type="text" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" dir="ltr" autocomplete="one-time-code" required>
+          <div class="row">
+            <button id="verify-otp" class="primary" type="submit">تأكيد الدخول</button>
+            <button id="change-phone" class="ghost" type="button">تغيير الرقم</button>
+          </div>
+        </div>
+      </form>
+      <p id="auth-message" class="message" role="status" aria-live="polite"></p>
+    </section>
+    <footer class="auth-foot">QAT LINK • دفتر التجارة المشترك</footer>
+  </main>
+
+  <main id="dashboard-view" class="dashboard" hidden>
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div class="mini-mark" aria-hidden="true"></div>
+        <div>
+          <strong>QAT LINK</strong>
+          <span>لوحة الإدارة</span>
+        </div>
+      </div>
+      <nav>
+        <a class="nav-item active" href="#service-controls">مفاتيح الخدمة</a>
+      </nav>
+      <div class="sidebar-foot">
+        <div id="admin-identity" class="identity"></div>
+        <button id="logout" class="ghost full" type="button">تسجيل الخروج</button>
+      </div>
+    </aside>
+
+    <section class="workspace">
+      <header class="workspace-head">
+        <div>
+          <p class="eyebrow">مركز التحكم</p>
+          <h1>مفاتيح الخدمة</h1>
+          <p class="lede">تحكم مركزي قابل للتدقيق في الخدمات الحساسة. لا يغيّر هذا المفتاح أي قيد مالي قائم.</p>
+        </div>
+        <button id="refresh" class="ghost" type="button">تحديث</button>
+      </header>
+
+      <div id="dashboard-message" class="message" role="status" aria-live="polite"></div>
+
+      <article class="panel" aria-labelledby="sales-returns-title">
+        <div class="panel-head">
+          <div>
+            <h2 id="sales-returns-title">مرتجعات البيع</h2>
+            <p id="service-description">تعطيل إنشاء مرتجعات بيع جديدة لجميع العلاقات. العمليات المنشورة تبقى غير قابلة للتعديل.</p>
+          </div>
+          <span id="service-state" class="pill muted">جارٍ التحميل</span>
+        </div>
+        <dl class="meta">
+          <div>
+            <dt>آخر تحديث</dt>
+            <dd id="service-updated-at">—</dd>
+          </div>
+          <div>
+            <dt>بواسطة</dt>
+            <dd id="service-updated-by">—</dd>
+          </div>
+        </dl>
+        <div class="control-row">
+          <div>
+            <strong>السماح بمرتجعات البيع</strong>
+            <p>عند الإيقاف تُرفض الطلبات الجديدة برمز 503، ولا تتأثر السجلات السابقة.</p>
+          </div>
+          <label class="switch">
+            <input id="sales-returns-toggle" type="checkbox" disabled>
+            <span aria-hidden="true"></span>
+            <span class="sr-only">تبديل مرتجعات البيع</span>
+          </label>
+        </div>
+      </article>
+
+      <article class="panel scope-panel">
+        <h2>نطاق اللوحة الحالي</h2>
+        <p>تعرض هذه النسخة مفتاح خدمة مرتجعات البيع المتاح في خادم QAT LINK. إدارة المستخدمين والعلاقات والتقارير المالية تحتاج واجهات خادم مخصصة ومراجعة صلاحيات قبل إضافتها.</p>
+      </article>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

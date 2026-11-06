@@ -144,7 +144,11 @@ export function createSessionPrincipalResolver(
   };
 }
 
-export function buildIdentityApi({
+export function buildIdentityApi(deps: IdentityDependencies): FastifyInstance {
+  return registerIdentityApi(Fastify({ logger: false }), deps);
+}
+
+export function registerIdentityApi(app: FastifyInstance, {
   pool,
   otpDelivery,
   otpPepper,
@@ -162,7 +166,6 @@ export function buildIdentityApi({
     throw new Error("REFRESH_TOKEN_PEPPER must be at least 32 bytes");
   }
 
-  const app = Fastify({ logger: false });
   app.decorateRequest("identityPrincipal", null);
   const resolvePrincipal = createSessionPrincipalResolver(pool, accessTokenSecret, now);
 
