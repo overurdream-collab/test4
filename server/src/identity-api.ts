@@ -24,6 +24,7 @@ type IdentityDependencies = {
   otpPepper: string;
   accessTokenSecret: string;
   refreshTokenPepper?: string;
+  uatOtpCode?: string;
   now?: () => number;
 };
 
@@ -154,6 +155,7 @@ export function registerIdentityApi(app: FastifyInstance, {
   otpPepper,
   accessTokenSecret,
   refreshTokenPepper = accessTokenSecret,
+  uatOtpCode,
   now = Date.now
 }: IdentityDependencies): FastifyInstance {
   if (Buffer.byteLength(otpPepper, "utf8") < 32) {
@@ -196,7 +198,7 @@ export function registerIdentityApi(app: FastifyInstance, {
       if (!PHONE.test(phoneE164)) return reply.code(400).send({ error: "invalid_phone" });
       const ipHash = hmac(otpPepper, "ip:" + request.ip);
       try {
-        const code = randomInt(100000, 1000000).toString();
+        const code = uatOtpCode ?? randomInt(100000, 1000000).toString();
         const codeHash = hmac(otpPepper, "login:" + phoneE164 + ":" + code);
         const expiresAt = new Date(now() + 5 * 60 * 1000);
         const challenge = await pool.query<{ challenge_id: string | null }>(

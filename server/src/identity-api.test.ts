@@ -3,6 +3,7 @@ import { createHmac } from "node:crypto";
 import test from "node:test";
 import type { Pool } from "pg";
 import { buildIdentityApi, createSessionPrincipalResolver, type OtpDeliveryAdapter } from "./identity-api.js";
+import { readUatOtpCode } from "./server.js";
 
 const otpPepper = "test-otp-pepper-must-be-at-least-32-bytes";
 const accessSecret = "test-access-secret-must-be-at-least-32-bytes";
@@ -33,6 +34,33 @@ test("OTP request stores only a digest and never returns the code", async () => 
   assert.equal(storedHash?.toString("utf8").includes(deliveredCode), false);
   assert.equal(response.body.includes(deliveredCode), false);
   await app.close();
+});
+
+test("UAT fixed OTP code overrides the generated code", async () => {
+  let deliveredCode = "";
+  const pool = makePool(async (sql: string) => {
+    if (sql.includes("identity.create_otp_challenge")) {
+      return { rows: [{ challenge_id: "83000000-0000-0000-0000-000000000001" }] };
+    }
+    return { rows: [] };
+  });
+  const app = buildIdentityApi({
+    pool,
+    otpDelivery: { sendCode: async (_phone, code) => { deliveredCode = code; } },
+    otpPepper,
+    accessTokenSecret: accessSecret,
+    uatOtpCode: "123456"
+  });
+  const response = await app.inject({ method: "POST", url: "/v1/auth/otp/request", payload: { phoneE164: phone } });
+  assert.equal(response.statusCode, 202);
+  assert.equal(deliveredCode, "123456");
+  await app.close();
+});
+
+test("UAT fixed OTP rejects production and malformed values", () => {
+  assert.equal(readUatOtpCode({ OTP_UAT_CODE: "123456" }), "123456");
+  assert.throws(() => readUatOtpCode({ NODE_ENV: "production", OTP_UAT_CODE: "123456" }), /must not be set in production/);
+  assert.throws(() => readUatOtpCode({ OTP_UAT_CODE: "12345" }), /exactly 6 digits/);
 });
 
 test("OTP request rejects invalid E.164 input", async () => {

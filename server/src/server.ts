@@ -27,6 +27,18 @@ function bytes(env: Environment, name: string, fallback?: string): string {
   return value;
 }
 
+export function readUatOtpCode(env: Environment): string | undefined {
+  const code = env.OTP_UAT_CODE?.trim();
+  if (!code) return undefined;
+  if (env.NODE_ENV === "production") {
+    throw new Error("OTP_UAT_CODE must not be set in production");
+  }
+  if (!/^[0-9]{6}$/.test(code)) {
+    throw new Error("OTP_UAT_CODE must be exactly 6 digits");
+  }
+  return code;
+}
+
 export function createOtpDelivery(env: Environment): OtpDeliveryAdapter {
   const webhookUrl = env.OTP_WEBHOOK_URL?.trim();
   const webhookToken = env.OTP_WEBHOOK_TOKEN?.trim();
@@ -97,13 +109,16 @@ export function createServer(env: Environment = process.env): FastifyInstance {
   });
 
   const otpDelivery = createOtpDelivery(env);
+  const uatOtpCode = readUatOtpCode(env);
+  if (uatOtpCode) app.log.warn("UAT fixed OTP is enabled; never use OTP_UAT_CODE in production");
   app.register(async scope => {
     registerIdentityApi(scope, {
       pool,
       otpDelivery,
       otpPepper,
       accessTokenSecret,
-      refreshTokenPepper
+      refreshTokenPepper,
+      ...(uatOtpCode ? { uatOtpCode } : {})
     });
   });
   app.register(async scope => {
