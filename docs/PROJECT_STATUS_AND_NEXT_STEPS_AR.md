@@ -1,9 +1,9 @@
 # حالة المشروع وخطة العمل — دفتر الحسابات التجارية المشترك
 
-**آخر تحديث:** 2026-11-06 — فرع الإصدار `feat/qat-link-release` قيد التحقق والدمج
+**آخر تحديث:** 2026-11-06 — دمج فرع الإصدار `feat/qat-link-release` والتحقق على main
 **المستودع:** https://github.com/overurdream-collab/test4  
 **الفرع الأساسي:** main  
-**آخر merge على main:** 3fc85ff0ff6ed05da9877fb954a4703da4efe6f1
+**آخر merge على main:** 21ca225698210c34f7dbd11fd11f7d0cdab6a34f
 
 ## 1. الخلاصة التنفيذية
 
@@ -1122,8 +1122,29 @@
 - ملاحظة تشغيلية: اختبار Flutter من مسار WSL/UNC يتوقف عند `objective_c.lock`؛ نُفذ من نسخة `C:\temp\qat_link_verify`. اختبارات الخادم نُفذت من نسخة `C:\temp\qat_link_server_verify` لتجنب تعارض `esbuild` Linux/Windows.
 - تحذيرات build web غير مانعة: `flutter_secure_storage_web` غير متوافق مع Wasm، وخط `CupertinoIcons` غير مضمّن.
 
+### حالة PR والدمج
+- PR #57: https://github.com/overurdream-collab/test4/pull/57
+- Commit التنفيذ: `01fb8ab9846dd015ec06502fcb149b7252772793`.
+- Merge SHA على main: `21ca225698210c34f7dbd11fd11f7d0cdab6a34f`.
+- فحوصات PR: `13/13` ناجحة، بما فيها:
+  - QAT LINK UI CI Run `42283149308`.
+  - Flutter CI Run `42283149009`.
+  - Mobile core Run `42283149074`.
+  - SQLCipher Run `42283149314`.
+  - Approval API Run `42283149517`.
+  - Backup/restore Run `42283149162`.
+  - Financial lifecycle Run `42283149278`.
+  - Ledger PostgreSQL Run `42283149169`.
+  - Two-device E2E Run `42283149167`.
+- فحوصات main بعد الدمج كلها ناجحة:
+  - QAT LINK UI CI Run `42284097374`.
+  - Flutter CI Run `42284097408`.
+  - Two-device offline E2E Run `42284097376`.
+  - Server financial lifecycle E2E Run `42284097447`.
+  - Backup/restore verification Run `42284097365`.
+  - Ledger PostgreSQL tests Run `42284097391`.
+
 ### المتبقي قبل الإطلاق
-- الفرع لم يُرفع/يُدمج بعد؛ فحوصات CI على PR و`main` مطلوبة قبل أي إعلان نجاح.
 - مزود OTP الإنتاجي وwebhook وبياناته السرية غير متوفرة.
 - عنوان API الإنتاجي، keystore أندرويد، توقيع Apple، وموافقة النشر غير متوفرة.
 - لا يمكن بناء/اختبار iOS على Linux؛ يلزم macOS/Xcode.
