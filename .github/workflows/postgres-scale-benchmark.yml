@@ -13,7 +13,7 @@ permissions:
 jobs:
   scale-benchmark:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -66,4 +66,17 @@ jobs:
         working-directory: server
         env:
           DATABASE_URL: postgres://ledger_test:ledger_test@localhost:5432/ledger_test
+          BENCH_SEED: ledger-soak-seed-2026-11-02
+          HOT_RELATIONSHIP_SHARE: "0.8"
+          SOAK_CONCURRENCY: "50"
+          SOAK_DURATIONS_SECONDS: "60,300"
+          SOAK_REPEATS: "3"
+          BENCH_REPORT_PATH: bench/financial-soak-results.jsonl
         run: node bench/financial-profile.mjs
+      - name: Upload soak measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: financial-hot-relationship-soak
+          path: server/bench/financial-soak-results.jsonl
+          if-no-files-found: warn
