@@ -4,6 +4,7 @@ import '../../config/app_config.dart';
 import '../../data/api_models.dart';
 import '../../design/components.dart';
 import '../../design/tokens.dart';
+import '../../models.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -17,6 +18,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _otpController = TextEditingController();
   int _step = 0;
   bool _busy = false;
+  AccountType _accountType = AccountType.customer;
 
   @override
   void initState() {
@@ -91,10 +93,15 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _busy = true);
     try {
       if (state.isRemote) {
-        await state.verifyOtp(phone: _phoneController.text, code: code);
+        await state.verifyOtp(
+          phone: _phoneController.text,
+          code: code,
+          accountType: _accountType,
+        );
       } else {
         await Future<void>.delayed(const Duration(milliseconds: 650));
         if (!mounted) return;
+        state.selectAccountType(_accountType);
         state.login();
       }
     } on ApiException catch (error) {
@@ -130,95 +137,113 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      body: Container(
+      backgroundColor: isDark ? QColors.night : QColors.pearlWhite,
+      body: DecoratedBox(
         decoration: BoxDecoration(
           gradient: LinearGradient(
-            begin: Alignment.topRight,
-            end: Alignment.bottomLeft,
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
             colors: isDark
                 ? const [QColors.night, QColors.nightSurface]
-                : const [
-                    Color(0xFFF2FFF7),
-                    QColors.pearlWhite,
-                    Color(0xFFE6FBEF),
-                  ],
+                : const [QColors.pearlWhite, QColors.softMint],
           ),
         ),
         child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(QSpace.xl),
-            child: QResponsiveBody(
-              maxWidth: 520,
-              padding: EdgeInsets.zero,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const SizedBox(height: QSpace.xxl),
-                  const Align(
-                    alignment: Alignment.centerRight,
-                    child: QLogoMark(size: 76, showGlow: true),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              return SingleChildScrollView(
+                padding: const EdgeInsets.all(QSpace.lg),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: constraints.maxHeight - QSpace.xxl,
                   ),
-                  const SizedBox(height: QSpace.xl),
-                  Text(
-                    'QAT LINK',
-                    style: Theme.of(context).textTheme.displayMedium,
-                  ),
-                  Text(
-                    'قات لينك • دفتر التجارة المشترك',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: QColors.brightGreen,
+                  child: Center(
+                    child: QResponsiveBody(
+                      maxWidth: 480,
+                      padding: EdgeInsets.zero,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: QColors.softMint,
+                              border: Border.all(
+                                color: QColors.freshGreen,
+                                width: 4,
+                              ),
+                              boxShadow: QColors.brandGlow,
+                            ),
+                            child: const QBrandAvatar(size: 104),
+                          ),
+                          const SizedBox(height: QSpace.lg),
+                          Text(
+                            'مرحباً بك في QAT LINK',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.headlineSmall
+                                ?.copyWith(
+                                  color: QColors.brightGreen,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                          ),
+                          const SizedBox(height: QSpace.xs),
+                          Text(
+                            'التطبيق المالي الذكي لإدارة الديون والتحصيلات في اليمن',
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                          const SizedBox(height: QSpace.xl),
+                          QCard(
+                            padding: const EdgeInsets.all(QSpace.xl),
+                            child: AnimatedSwitcher(
+                              duration: QDuration.normal,
+                              child: _step == 0 ? _phoneStep() : _otpStep(),
+                            ),
+                          ),
+                          const SizedBox(height: QSpace.lg),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(
+                                Icons.shield_outlined,
+                                size: 15,
+                                color: QColors.neutralGray,
+                              ),
+                              const SizedBox(width: QSpace.xs),
+                              Flexible(
+                                child: Text(
+                                  'بياناتك المالية مشفرة ولا تظهر إلا لك ولأطراف علاقاتك.',
+                                  textAlign: TextAlign.center,
+                                  style: Theme.of(context).textTheme.labelSmall,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: QSpace.sm),
+                          Wrap(
+                            alignment: WrapAlignment.center,
+                            spacing: QSpace.lg,
+                            runSpacing: QSpace.sm,
+                            children: [
+                              if (!QScope.of(context).isRemote)
+                                TextButton(
+                                  onPressed: () => QScope.of(context).login(),
+                                  child: const Text('دخول تجريبي سريع'),
+                                ),
+                              TextButton(
+                                onPressed: () {},
+                                child: const Text('الشروط والخصوصية'),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                  const SizedBox(height: QSpace.sm),
-                  Text(
-                    'أنت تسجل.. وأنا أعتمد.',
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodyLarge?.copyWith(color: QColors.neutralGray),
-                  ),
-                  const SizedBox(height: QSpace.huge),
-                  AnimatedSwitcher(
-                    duration: QDuration.normal,
-                    child: _step == 0 ? _phoneStep() : _otpStep(),
-                  ),
-                  const SizedBox(height: QSpace.xl),
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.shield_outlined,
-                        size: 16,
-                        color: QColors.neutralGray,
-                      ),
-                      const SizedBox(width: QSpace.sm),
-                      Expanded(
-                        child: Text(
-                          'بياناتك المالية مشفرة، ولا تظهر إلا لك ولأطراف علاقاتك.',
-                          style: Theme.of(context).textTheme.labelSmall,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: QSpace.lg),
-                  Wrap(
-                    alignment: WrapAlignment.center,
-                    spacing: QSpace.lg,
-                    runSpacing: QSpace.sm,
-                    children: [
-                      if (!QScope.of(context).isRemote)
-                        TextButton(
-                          onPressed: () => QScope.of(context).login(),
-                          child: const Text('دخول تجريبي سريع'),
-                        ),
-                      TextButton(
-                        onPressed: () {},
-                        child: const Text('الشروط والخصوصية'),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: QSpace.xxl),
-                ],
-              ),
-            ),
+                ),
+              );
+            },
           ),
         ),
       ),
@@ -228,26 +253,61 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget _phoneStep() {
     return Column(
       key: const ValueKey('phone'),
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text('تسجيل الدخول', style: Theme.of(context).textTheme.headlineMedium),
-        const SizedBox(height: QSpace.sm),
         Text(
-          'أدخل رقم جوالك وسنرسل لك رمز تحقق. لا نحتاج كلمة مرور.',
+          'تسجيل الدخول',
+          textAlign: TextAlign.center,
           style: Theme.of(
             context,
-          ).textTheme.bodyMedium?.copyWith(color: QColors.neutralGray),
+          ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
         ),
-        const SizedBox(height: QSpace.xl),
+        const SizedBox(height: QSpace.xs),
+        Text(
+          'أدخل رقم جوالك وسنرسل لك رمز تحقق. لا نحتاج كلمة مرور.',
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        const SizedBox(height: QSpace.lg),
         TextField(
           controller: _phoneController,
           keyboardType: TextInputType.phone,
           textDirection: TextDirection.ltr,
+          textAlign: TextAlign.center,
           decoration: const InputDecoration(
             labelText: 'رقم الجوال',
             hintText: '+967 7xx xxx xxx',
             prefixIcon: Icon(Icons.phone_iphone_rounded),
           ),
+        ),
+        const SizedBox(height: QSpace.lg),
+        Text('نوع الحساب', style: Theme.of(context).textTheme.labelMedium),
+        const SizedBox(height: QSpace.xs),
+        Wrap(
+          alignment: WrapAlignment.center,
+          spacing: QSpace.sm,
+          runSpacing: QSpace.sm,
+          children: AccountType.values.map((type) {
+            final selected = _accountType == type;
+            return ChoiceChip(
+              label: Text(type.label),
+              avatar: Icon(switch (type) {
+                AccountType.customer => Icons.person_outline_rounded,
+                AccountType.merchant => Icons.storefront_outlined,
+                AccountType.supplier => Icons.local_shipping_outlined,
+              }, size: 18),
+              selected: selected,
+              onSelected: _busy
+                  ? null
+                  : (_) => setState(() => _accountType = type),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: QSpace.xs),
+        Text(
+          'يُثبّت نوع الحساب عند أول تسجيل.',
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.labelSmall,
         ),
         const SizedBox(height: QSpace.lg),
         QGradientButton(
@@ -262,17 +322,22 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget _otpStep() {
     return Column(
       key: const ValueKey('otp'),
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text('رمز التحقق', style: Theme.of(context).textTheme.headlineMedium),
-        const SizedBox(height: QSpace.sm),
         Text(
-          'أرسلنا رمزاً إلى ${_phoneController.text}. أدخل الرمز للمتابعة.',
+          'رمز التحقق',
+          textAlign: TextAlign.center,
           style: Theme.of(
             context,
-          ).textTheme.bodyMedium?.copyWith(color: QColors.neutralGray),
+          ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
         ),
-        const SizedBox(height: QSpace.xl),
+        const SizedBox(height: QSpace.xs),
+        Text(
+          'أرسلنا رمزاً إلى ${_phoneController.text}',
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+        const SizedBox(height: QSpace.lg),
         TextField(
           controller: _otpController,
           keyboardType: TextInputType.number,
@@ -287,7 +352,6 @@ class _LoginScreenState extends State<LoginScreen> {
             prefixIcon: Icon(Icons.lock_outline_rounded),
           ),
         ),
-        const SizedBox(height: QSpace.sm),
         Align(
           alignment: Alignment.centerLeft,
           child: TextButton(
@@ -295,7 +359,6 @@ class _LoginScreenState extends State<LoginScreen> {
             child: const Text('تغيير الرقم'),
           ),
         ),
-        const SizedBox(height: QSpace.lg),
         QGradientButton(
           label: _busy ? 'جارٍ التحقق...' : 'تأكيد الدخول',
           icon: Icons.check_rounded,

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../design/components.dart';
@@ -5,9 +7,13 @@ import '../../design/tokens.dart';
 import '../../format.dart';
 import '../../models.dart';
 import '../../state/app_state.dart';
+import '../shared/admin_ads_carousel.dart';
 import '../shared/notifications_screen.dart';
-import '../shared/profile_switch_sheet.dart';
+import '../shared/statement_screen.dart';
 import 'customer_detail_screen.dart';
+import 'merchant_customers_screen.dart';
+import 'new_customer_screen.dart';
+import 'new_debt_sheet.dart';
 
 class MerchantHomeScreen extends StatefulWidget {
   const MerchantHomeScreen({super.key});
@@ -17,7 +23,6 @@ class MerchantHomeScreen extends StatefulWidget {
 }
 
 class _MerchantHomeScreenState extends State<MerchantHomeScreen> {
-  int _period = 0;
   String? _customerFilter;
 
   @override
@@ -29,30 +34,13 @@ class _MerchantHomeScreenState extends State<MerchantHomeScreen> {
         : customers
               .where((customer) => customer.id == _customerFilter)
               .toList();
-    final chartValues = switch (_period) {
-      0 => const <double>[42, 58, 36, 72, 64, 88, 76],
-      1 => const <double>[52, 74, 61, 88, 69, 96, 82],
-      _ => const <double>[36, 62, 48, 78, 71, 92, 84],
-    };
 
     return Scaffold(
       appBar: AppBar(
         leadingWidth: 60,
-        leading: Padding(
-          padding: const EdgeInsets.only(right: QSpace.sm),
-          child: GestureDetector(
-            onTap: () => showModalBottomSheet<void>(
-              context: context,
-              backgroundColor: Theme.of(context).colorScheme.surface,
-              shape: const RoundedRectangleBorder(
-                borderRadius: BorderRadius.vertical(
-                  top: Radius.circular(QRadius.xl),
-                ),
-              ),
-              builder: (_) => const ProfileSwitchSheet(),
-            ),
-            child: const QLogoMark(size: 40),
-          ),
+        leading: const Padding(
+          padding: EdgeInsets.only(right: QSpace.sm),
+          child: QBrandAvatar(size: 40),
         ),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -116,28 +104,36 @@ class _MerchantHomeScreenState extends State<MerchantHomeScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         _StoreCard(state: state),
-                        if (state.bannerAdVisible) ...[
+                        if (state.ads.isNotEmpty) ...[
                           const SizedBox(height: QSpace.md),
-                          const _AdminBanner(),
+                          AdminAdsCarousel(ads: state.ads),
                         ],
                         const SizedBox(height: QSpace.lg),
-                        _TotalsRow(state: state),
-                        const SizedBox(height: QSpace.lg),
+                        _QuickActions(state: state),
+                        const SizedBox(height: QSpace.xl),
+                        _TodaySection(state: state),
+                        const SizedBox(height: QSpace.xl),
                         LayoutBuilder(
                           builder: (context, constraints) {
                             final wide = constraints.maxWidth >= 840;
-                            final chart = _ChartCard(
-                              period: _period,
-                              values: chartValues,
-                              onPeriodChanged: (value) =>
-                                  setState(() => _period = value),
-                            );
+                            final chart = _ActivityCard(state: state);
                             final list = _CustomersCard(
                               state: state,
                               customers: filtered,
                               selectedCustomer: _customerFilter,
                               onCustomerChanged: (value) =>
                                   setState(() => _customerFilter = value),
+                              onViewAll: () => Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) =>
+                                      const MerchantCustomersScreen(),
+                                ),
+                              ),
+                              onAdd: () => Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => const NewCustomerScreen(),
+                                ),
+                              ),
                             );
                             if (!wide) {
                               return Column(
@@ -179,35 +175,34 @@ class _StoreCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final collected = state.merchantEntries
+        .where(
+          (entry) =>
+              entry.status == TxStatus.approved &&
+              (entry.type == OperationType.payment ||
+                  entry.type == OperationType.refund ||
+                  entry.type == OperationType.salesReturn),
+        )
+        .fold<int>(0, (total, entry) => total + entry.amountMinor);
     return QCard(
       padding: const EdgeInsets.all(QSpace.xl),
-      gradient: LinearGradient(
-        begin: Alignment.topRight,
-        end: Alignment.bottomLeft,
-        colors: [
-          QColors.brightGreen,
-          QColors.freshGreen,
-          QColors.lightGreen.withValues(alpha: 0.92),
-        ],
-      ),
+      gradient: QColors.gradient,
       borderColor: Colors.transparent,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: 66,
-                height: 66,
+                padding: const EdgeInsets.all(2),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.28),
-                  borderRadius: BorderRadius.circular(QRadius.md),
+                  shape: BoxShape.circle,
                   border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.36),
+                    color: Colors.white.withValues(alpha: 0.8),
+                    width: 2,
                   ),
                 ),
-                child: const QLogoMark(size: 66),
+                child: const QBrandAvatar(size: 52),
               ),
               const SizedBox(width: QSpace.md),
               Expanded(
@@ -216,16 +211,19 @@ class _StoreCard extends StatelessWidget {
                   children: [
                     Text(
                       state.user.storeName,
-                      style: Theme.of(context).textTheme.headlineSmall
-                          ?.copyWith(
-                            color: QColors.charcoal,
-                            fontWeight: FontWeight.w700,
-                          ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: QColors.pureWhite,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                     Text(
                       state.user.category,
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: QColors.charcoal.withValues(alpha: 0.74),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: Colors.white.withValues(alpha: 0.8),
                       ),
                     ),
                   ],
@@ -237,13 +235,13 @@ class _StoreCard extends StatelessWidget {
                   vertical: 4,
                 ),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.34),
+                  color: Colors.white.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(QRadius.pill),
                 ),
                 child: Text(
                   'موثّق',
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: QColors.charcoal,
+                    color: QColors.pureWhite,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
@@ -251,42 +249,61 @@ class _StoreCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: QSpace.lg),
-          Wrap(
-            spacing: QSpace.lg,
-            runSpacing: QSpace.sm,
+          Row(
             children: [
-              _StoreMeta(icon: Icons.place_outlined, label: state.user.address),
-              _StoreMeta(icon: Icons.phone_outlined, label: state.user.phone),
+              Text(
+                'الريال اليمني',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  color: QColors.pureWhite,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                'YER · ﷼',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.78),
+                ),
+              ),
             ],
           ),
-          const SizedBox(height: QSpace.lg),
-          Divider(color: QColors.charcoal.withValues(alpha: 0.14)),
           const SizedBox(height: QSpace.sm),
+          Text(
+            'إجمالي الديون',
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: Colors.white.withValues(alpha: 0.8),
+            ),
+          ),
+          Text(
+            formatMoney(state.approvedReceivable, hidden: state.hideAmounts),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+              color: QColors.pureWhite,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: QSpace.lg),
           Row(
             children: [
               Expanded(
-                child: _StoreMetric(
-                  label: 'إجمالي المستحق المعتمد',
-                  value: formatMoney(
-                    state.approvedReceivable,
-                    hidden: state.hideAmounts,
-                  ),
+                child: _CurrencyPill(
+                  label: 'المسدد',
+                  value: formatCompactMoney(collected),
                 ),
               ),
-              Container(
-                width: 1,
-                height: 42,
-                color: QColors.charcoal.withValues(alpha: 0.14),
-              ),
-              const SizedBox(width: QSpace.lg),
+              const SizedBox(width: QSpace.sm),
               Expanded(
-                child: _StoreMetric(
-                  label: 'المبالغ المعلقة',
-                  value: formatMoney(
-                    state.pendingReceivable,
-                    hidden: state.hideAmounts,
-                  ),
-                  valueColor: QColors.charcoal,
+                child: _CurrencyPill(
+                  label: 'العالق',
+                  value: formatCompactMoney(state.pendingReceivable),
+                ),
+              ),
+              const SizedBox(width: QSpace.sm),
+              Expanded(
+                child: _CurrencyPill(
+                  label: 'العملاء',
+                  value: '${state.customers.length}',
                 ),
               ),
             ],
@@ -297,175 +314,295 @@ class _StoreCard extends StatelessWidget {
   }
 }
 
-class _StoreMeta extends StatelessWidget {
-  const _StoreMeta({required this.icon, required this.label});
+class _CurrencyPill extends StatelessWidget {
+  const _CurrencyPill({required this.label, required this.value});
 
-  final IconData icon;
   final String label;
+  final String value;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 15, color: QColors.charcoal.withValues(alpha: 0.7)),
-        const SizedBox(width: 4),
-        Flexible(
-          child: Text(
+    return Container(
+      padding: const EdgeInsets.symmetric(
+        horizontal: QSpace.sm,
+        vertical: QSpace.sm,
+      ),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(QRadius.md),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
             label,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: QColors.charcoal.withValues(alpha: 0.76),
+              color: Colors.white.withValues(alpha: 0.78),
             ),
           ),
-        ),
-      ],
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.labelLarge?.copyWith(
+              color: QColors.pureWhite,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
-class _StoreMetric extends StatelessWidget {
-  const _StoreMetric({
-    required this.label,
-    required this.value,
-    this.valueColor = QColors.charcoal,
-  });
-
-  final String label;
-  final String value;
-  final Color valueColor;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-            color: QColors.charcoal.withValues(alpha: 0.68),
-          ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          value,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-            color: valueColor,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _TotalsRow extends StatelessWidget {
-  const _TotalsRow({required this.state});
+class _QuickActions extends StatelessWidget {
+  const _QuickActions({required this.state});
 
   final AppState state;
 
   @override
   Widget build(BuildContext context) {
-    final stats = [
+    final actions = [
       (
-        label: 'عملاء',
-        value: '${state.customers.length}',
-        icon: Icons.people_alt_outlined,
-        color: QColors.approvedFg,
+        label: 'دين جديد',
+        icon: Icons.receipt_long_rounded,
+        onTap: () => _openDebt(context),
       ),
       (
-        label: 'معلقة',
-        value: '${state.pendingMerchantCount}',
-        icon: Icons.schedule_rounded,
-        color: QColors.pendingFg,
-      ),
-      (
-        label: 'إجمالي الحركة',
-        value: formatCompactMoney(
-          state.merchantEntries
-              .where((entry) => entry.status == TxStatus.approved)
-              .fold(0, (total, entry) => total + entry.amountMinor),
+        label: 'عميل جديد',
+        icon: Icons.person_add_alt_1_rounded,
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(builder: (_) => const NewCustomerScreen()),
         ),
+      ),
+      (
+        label: 'الحركة',
         icon: Icons.swap_horiz_rounded,
-        color: QColors.brightGreen,
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(builder: (_) => const StatementScreen()),
+        ),
+      ),
+      (
+        label: 'الإشعارات',
+        icon: Icons.notifications_none_rounded,
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(builder: (_) => const NotificationsScreen()),
+        ),
       ),
     ];
     return Row(
       children: [
-        for (var index = 0; index < stats.length; index++) ...[
+        for (var index = 0; index < actions.length; index++) ...[
           Expanded(
-            child: QCard(
-              padding: const EdgeInsets.all(QSpace.md),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(stats[index].icon, size: 20, color: stats[index].color),
-                  const SizedBox(height: QSpace.sm),
-                  Text(
-                    stats[index].value,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  Text(
-                    stats[index].label,
-                    style: Theme.of(context).textTheme.labelSmall,
-                  ),
-                ],
-              ),
+            child: QQuickAction(
+              icon: actions[index].icon,
+              label: actions[index].label,
+              onTap: actions[index].onTap,
             ),
           ),
-          if (index != stats.length - 1) const SizedBox(width: QSpace.sm),
+          if (index != actions.length - 1) const SizedBox(width: QSpace.sm),
         ],
+      ],
+    );
+  }
+
+  void _openDebt(BuildContext context) {
+    if (state.customers.isEmpty) {
+      QToast.show(context, 'أضف عميلاً أولاً لتسجيل دين جديد');
+      return;
+    }
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(QRadius.xl)),
+      ),
+      builder: (_) => const NewDebtSheet(),
+    );
+  }
+}
+
+class _TodaySection extends StatelessWidget {
+  const _TodaySection({required this.state});
+
+  final AppState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final todayEntries = state.merchantEntries.where(
+      (entry) =>
+          entry.createdAt.year == now.year &&
+          entry.createdAt.month == now.month &&
+          entry.createdAt.day == now.day,
+    );
+    final charges = todayEntries
+        .where(
+          (entry) =>
+              entry.status == TxStatus.approved &&
+              (entry.type == OperationType.charge ||
+                  entry.type == OperationType.creditApplication),
+        )
+        .fold<int>(0, (total, entry) => total + entry.amountMinor);
+    final payments = todayEntries
+        .where(
+          (entry) =>
+              entry.status == TxStatus.approved &&
+              (entry.type == OperationType.payment ||
+                  entry.type == OperationType.refund ||
+                  entry.type == OperationType.salesReturn),
+        )
+        .fold<int>(0, (total, entry) => total + entry.amountMinor);
+    final pending = todayEntries
+        .where((entry) => entry.status == TxStatus.pending)
+        .length;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        QSectionHeader(
+          title: 'اليوم',
+          subtitle: formatDate(now),
+          actionLabel: 'الحركة',
+          onAction: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => const StatementScreen()),
+          ),
+        ),
+        Row(
+          children: [
+            Expanded(
+              child: _MetricCard(
+                icon: Icons.north_east_rounded,
+                label: 'دين جديد',
+                value: formatCompactMoney(charges),
+                color: QColors.brightGreen,
+                background: QColors.softMint,
+              ),
+            ),
+            const SizedBox(width: QSpace.sm),
+            Expanded(
+              child: _MetricCard(
+                icon: Icons.south_west_rounded,
+                label: 'تحصيل',
+                value: formatCompactMoney(payments),
+                color: QColors.approvedFg,
+                background: QColors.approvedBg,
+              ),
+            ),
+            const SizedBox(width: QSpace.sm),
+            Expanded(
+              child: _MetricCard(
+                icon: Icons.schedule_rounded,
+                label: 'معلقة',
+                value: '$pending',
+                suffix: 'عملية',
+                color: QColors.pendingFg,
+                background: QColors.pendingBg,
+              ),
+            ),
+          ],
+        ),
       ],
     );
   }
 }
 
-class _ChartCard extends StatelessWidget {
-  const _ChartCard({
-    required this.period,
-    required this.values,
-    required this.onPeriodChanged,
+class _MetricCard extends StatelessWidget {
+  const _MetricCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+    required this.background,
+    this.suffix,
   });
 
-  final int period;
-  final List<double> values;
-  final ValueChanged<int> onPeriodChanged;
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color color;
+  final Color background;
+  final String? suffix;
 
   @override
   Widget build(BuildContext context) {
     return QCard(
+      padding: const EdgeInsets.all(QSpace.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: background,
+              borderRadius: BorderRadius.circular(11),
+            ),
+            child: Icon(icon, size: 18, color: color),
+          ),
+          const SizedBox(height: QSpace.sm),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: color,
+            ),
+          ),
+          if (suffix != null)
+            Text(
+              suffix!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelSmall,
+            ),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.labelSmall,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ActivityCard extends StatelessWidget {
+  const _ActivityCard({required this.state});
+
+  final AppState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final values = _weeklyValues();
+    final total = _weeklyTotal();
+    return QCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const QSectionHeader(
+            title: 'حركة الأسبوع',
+            subtitle: 'إجمالي الحركات المعتمدة',
+            padding: EdgeInsets.zero,
+          ),
+          const SizedBox(height: QSpace.md),
           Row(
             children: [
-              const Expanded(
-                child: QSectionHeader(
-                  title: 'حركة التعاملات',
-                  subtitle: 'نظرة سريعة على النشاط',
-                  padding: EdgeInsets.zero,
+              Expanded(
+                child: Text(
+                  formatMoney(total, hidden: state.hideAmounts),
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: QColors.charcoal,
+                  ),
                 ),
               ),
-              PopupMenuButton<int>(
-                initialValue: period,
-                onSelected: onPeriodChanged,
-                itemBuilder: (context) => const [
-                  PopupMenuItem(value: 0, child: Text('يومي')),
-                  PopupMenuItem(value: 1, child: Text('شهري')),
-                  PopupMenuItem(value: 2, child: Text('سنوي')),
-                ],
-                child: Chip(
-                  avatar: const Icon(Icons.tune_rounded, size: 15),
-                  label: Text(['يومي', 'شهري', 'سنوي'][period]),
-                ),
-              ),
+              const Icon(Icons.trending_up_rounded, color: QColors.brightGreen),
             ],
           ),
           const SizedBox(height: QSpace.lg),
@@ -475,14 +612,50 @@ class _ChartCard extends StatelessWidget {
             spacing: QSpace.md,
             runSpacing: QSpace.sm,
             children: [
-              _LegendDot(color: QColors.brightGreen, label: 'مبيعات'),
-              _LegendDot(color: QColors.premiumGold, label: 'مستحقات'),
-              _LegendDot(color: QColors.neutralGray, label: 'دفعات'),
+              _LegendDot(color: QColors.brightGreen, label: 'الحركة اليومية'),
             ],
           ),
         ],
       ),
     );
+  }
+
+  List<double> _weeklyValues() {
+    final totals = List<int>.filled(7, 0);
+    final now = DateTime.now();
+    for (final entry in state.merchantEntries) {
+      if (entry.status != TxStatus.approved) continue;
+      final difference = DateTime(now.year, now.month, now.day).difference(
+        DateTime(
+          entry.createdAt.year,
+          entry.createdAt.month,
+          entry.createdAt.day,
+        ),
+      );
+      if (difference.inDays < 0 || difference.inDays > 6) continue;
+      totals[6 - difference.inDays] += entry.amountMinor;
+    }
+    final highest = totals.fold<int>(1, math.max);
+    return [
+      for (final total in totals)
+        total == 0 ? 6 : (total / highest * 100).clamp(10, 100),
+    ];
+  }
+
+  int _weeklyTotal() {
+    final now = DateTime.now();
+    final start = DateTime(
+      now.year,
+      now.month,
+      now.day,
+    ).subtract(const Duration(days: 6));
+    return state.merchantEntries
+        .where(
+          (entry) =>
+              entry.status == TxStatus.approved &&
+              !entry.createdAt.isBefore(start),
+        )
+        .fold<int>(0, (total, entry) => total + entry.amountMinor);
   }
 }
 
@@ -515,12 +688,16 @@ class _CustomersCard extends StatelessWidget {
     required this.customers,
     required this.selectedCustomer,
     required this.onCustomerChanged,
+    required this.onViewAll,
+    required this.onAdd,
   });
 
   final AppState state;
   final List<Contact> customers;
   final String? selectedCustomer;
   final ValueChanged<String?> onCustomerChanged;
+  final VoidCallback onViewAll;
+  final VoidCallback onAdd;
 
   @override
   Widget build(BuildContext context) {
@@ -536,6 +713,11 @@ class _CustomersCard extends StatelessWidget {
                   subtitle: 'اضغط على العميل لعرض كشفه',
                   padding: EdgeInsets.zero,
                 ),
+              ),
+              IconButton(
+                tooltip: 'إضافة عميل',
+                onPressed: onAdd,
+                icon: const Icon(Icons.person_add_alt_1_rounded),
               ),
               PopupMenuButton<String?>(
                 initialValue: selectedCustomer,
@@ -559,7 +741,7 @@ class _CustomersCard extends StatelessWidget {
           if (customers.isEmpty)
             const QStateView(state: QDataState.empty, compact: true)
           else
-            for (var index = 0; index < customers.length; index++) ...[
+            for (var index = 0; index < customers.take(4).length; index++) ...[
               QContactTile(
                 contact: customers[index],
                 onTap: () => Navigator.of(context).push(
@@ -569,7 +751,7 @@ class _CustomersCard extends StatelessWidget {
                   ),
                 ),
               ),
-              if (index != customers.length - 1) const Divider(),
+              if (index != customers.take(4).length - 1) const Divider(),
             ],
           const SizedBox(height: QSpace.sm),
           QGradientButton(
@@ -577,7 +759,7 @@ class _CustomersCard extends StatelessWidget {
             icon: Icons.arrow_back_rounded,
             expand: false,
             height: 46,
-            onPressed: () {},
+            onPressed: onViewAll,
           ),
         ],
       ),
@@ -623,60 +805,15 @@ class _PendingOperations extends StatelessWidget {
             subtitle: '${pending.length} عمليات تحتاج متابعة',
             padding: EdgeInsets.zero,
             actionLabel: 'عرض',
-            onAction: () {},
+            onAction: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const StatementScreen()),
+            ),
           ),
           const SizedBox(height: QSpace.sm),
           for (var index = 0; index < pending.length; index++) ...[
             QEntryTile(entry: pending[index]),
             if (index != pending.length - 1) const Divider(),
           ],
-        ],
-      ),
-    );
-  }
-}
-
-class _AdminBanner extends StatelessWidget {
-  const _AdminBanner();
-
-  @override
-  Widget build(BuildContext context) {
-    return QCard(
-      padding: const EdgeInsets.all(QSpace.md),
-      gradient: const LinearGradient(
-        colors: [QColors.softMint, QColors.pureWhite],
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: QColors.brightGreen.withValues(alpha: 0.14),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(
-              Icons.campaign_outlined,
-              color: QColors.brightGreen,
-            ),
-          ),
-          const SizedBox(width: QSpace.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'إعلان الإدارة',
-                  style: Theme.of(context).textTheme.labelMedium,
-                ),
-                Text(
-                  'مساحة Banner مخصصة في رأس الرئيسية فقط.',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-              ],
-            ),
-          ),
-          const Icon(Icons.chevron_left_rounded, color: QColors.neutralGray),
         ],
       ),
     );

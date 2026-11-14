@@ -1,5 +1,23 @@
 enum AppPersona { merchant, customer }
 
+enum AccountType { customer, merchant, supplier }
+
+extension AccountTypeLabel on AccountType {
+  String get label => switch (this) {
+    AccountType.customer => 'زبون',
+    AccountType.merchant => 'تاجر',
+    AccountType.supplier => 'مورد',
+  };
+
+  String get description => switch (this) {
+    AccountType.customer => 'متابعة ما عليّ لدى التجار',
+    AccountType.merchant => 'إدارة العملاء والديون',
+    AccountType.supplier => 'إدارة المشتريات والموردين',
+  };
+
+  bool get isMerchantSide => this != AccountType.customer;
+}
+
 enum ContactKind { customer, supplier, merchant }
 
 enum OperationType {
@@ -235,6 +253,20 @@ class Plan {
   final bool featured;
 }
 
+class AdminAd {
+  const AdminAd({
+    required this.id,
+    required this.imageUrl,
+    this.title,
+    this.sortOrder = 0,
+  });
+
+  final String id;
+  final String imageUrl;
+  final String? title;
+  final int sortOrder;
+}
+
 class AppNotification {
   const AppNotification({
     required this.id,
@@ -243,6 +275,8 @@ class AppNotification {
     required this.kind,
     required this.at,
     this.read = false,
+    this.invitationId,
+    this.relationshipId,
   });
 
   final String id;
@@ -251,6 +285,8 @@ class AppNotification {
   final NotificationKind kind;
   final DateTime at;
   final bool read;
+  final String? invitationId;
+  final String? relationshipId;
 
   AppNotification copyWith({bool? read}) {
     return AppNotification(
@@ -260,6 +296,8 @@ class AppNotification {
       kind: kind,
       at: at,
       read: read ?? this.read,
+      invitationId: invitationId,
+      relationshipId: relationshipId,
     );
   }
 }

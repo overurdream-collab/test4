@@ -29,12 +29,14 @@ type IdentityDependencies = {
 };
 
 type OtpRequestBody = { phoneE164: string };
+type AccountType = "customer" | "merchant" | "supplier";
 type OtpVerifyBody = {
   phoneE164: string;
   code: string;
   deviceId: string;
   deviceLabel: string;
   platform: "android" | "ios" | "web";
+  accountType?: AccountType;
 };
 
 type AccessClaims = {
@@ -239,7 +241,8 @@ export function registerIdentityApi(app: FastifyInstance, {
             code: { type: "string", pattern: "^[0-9]{6}$" },
             deviceId: { type: "string", format: "uuid" },
             deviceLabel: { type: "string", minLength: 1, maxLength: 100 },
-            platform: { type: "string", enum: ["android","ios","web"] }
+            platform: { type: "string", enum: ["android","ios","web"] },
+            accountType: { type: "string", enum: ["customer","merchant","supplier"] }
           }
         }
       }
@@ -266,6 +269,14 @@ export function registerIdentityApi(app: FastifyInstance, {
         );
         const userId = userResult.rows[0]?.user_id;
         if (!userId) return reply.code(500).send({ error: "internal_error" });
+
+        const profileResult = await pool.query<{ account_type: string | null }>(
+          "UPDATE identity.user_profiles SET account_type=COALESCE(account_type,$2), " +
+          "updated_at=CASE WHEN account_type IS NULL AND $2::text IS NOT NULL THEN now() ELSE updated_at END " +
+          "WHERE user_id=$1::uuid RETURNING account_type",
+          [userId, body.accountType ?? null]
+        );
+        const accountType = profileResult.rows[0]?.account_type ?? null;
 
         const deviceResult = await pool.query<{ id: string }>(
           "INSERT INTO identity.devices(id,user_id,device_label,platform) " +
@@ -301,7 +312,7 @@ export function registerIdentityApi(app: FastifyInstance, {
         return reply.code(200).send({
           accessToken, tokenType: "Bearer", expiresAt,
           refreshToken: refresh.token, refreshExpiresAt: sessionExpiresAt,
-          user: { id: userId, phoneE164: body.phoneE164 },
+          user: { id: userId, phoneE164: body.phoneE164, accountType },
           deviceId: body.deviceId
         });
       } catch (error) {
@@ -386,9 +397,9 @@ export function registerIdentityApi(app: FastifyInstance, {
     try {
       const result = await pool.query<{
         user_id: string; phone_e164: string; display_name: string | null;
-        locale: string; device_id: string;
+        locale: string; account_type: string | null; is_admin: boolean; device_id: string;
       }>(
-        "SELECT u.id AS user_id,pi.phone_e164,p.display_name,p.locale,d.id AS device_id " +
+        "SELECT u.id AS user_id,pi.phone_e164,p.display_name,p.locale,p.account_type,u.is_admin,d.id AS device_id " +
         "FROM identity.users u " +
         "JOIN identity.phone_identities pi ON pi.user_id=u.id " +
         "JOIN identity.devices d ON d.user_id=u.id " +
@@ -400,7 +411,14 @@ export function registerIdentityApi(app: FastifyInstance, {
       const row = result.rows[0];
       if (!row) return reply.code(404).send({ error: "profile_not_found" });
       return reply.code(200).send({
-        user: { id: row.user_id, phoneE164: row.phone_e164, displayName: row.display_name, locale: row.locale },
+        user: {
+          id: row.user_id,
+          phoneE164: row.phone_e164,
+          displayName: row.display_name,
+          locale: row.locale,
+          accountType: row.account_type,
+          isAdmin: row.is_admin
+        },
         deviceId: row.device_id
       });
     } catch {

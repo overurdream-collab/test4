@@ -95,7 +95,7 @@ export function createServer(env: Environment = process.env): FastifyInstance {
       reply.header("Access-Control-Allow-Origin", origin);
       reply.header("Vary", "Origin");
       reply.header("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key");
-      reply.header("Access-Control-Allow-Methods", "GET,POST,PATCH,OPTIONS");
+      reply.header("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
       reply.header("Access-Control-Max-Age", "600");
     }
     if (request.method === "OPTIONS") {

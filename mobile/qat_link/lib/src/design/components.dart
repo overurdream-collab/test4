@@ -80,6 +80,39 @@ class QLogoMark extends StatelessWidget {
   }
 }
 
+class QBrandAvatar extends StatelessWidget {
+  const QBrandAvatar({
+    super.key,
+    this.size = 52,
+    this.showGlow = false,
+    this.borderColor = QColors.brightGreen,
+  });
+
+  final double size;
+  final bool showGlow;
+  final Color borderColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: QColors.softMint,
+        shape: BoxShape.circle,
+        border: Border.all(color: borderColor, width: size >= 56 ? 3 : 2),
+        boxShadow: showGlow ? QColors.brandGlow : null,
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Image.asset(
+        'assets/brand/qatlink_mascot.jpg',
+        fit: BoxFit.cover,
+        alignment: Alignment.topCenter,
+      ),
+    );
+  }
+}
+
 class _LeafLinkPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
@@ -322,6 +355,119 @@ class QMoney extends StatelessWidget {
   }
 }
 
+class QSummaryCircle extends StatelessWidget {
+  const QSummaryCircle({
+    required this.label,
+    required this.amountMinor,
+    required this.color,
+    super.key,
+    this.size = 86,
+    this.hidden,
+  });
+
+  final String label;
+  final int amountMinor;
+  final Color color;
+  final double size;
+  final bool? hidden;
+
+  @override
+  Widget build(BuildContext context) {
+    final state = QScope.of(context);
+    final isHidden = hidden ?? state.hideAmounts;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: size,
+          height: size,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: color.withValues(alpha: 0.10),
+            border: Border.all(color: color.withValues(alpha: 0.5), width: 2),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(QSpace.xs),
+            child: Text(
+              isHidden ? '••••' : formatCompactMoney(amountMinor),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                color: color,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: QSpace.xs),
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            color: color,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class QQuickAction extends StatelessWidget {
+  const QQuickAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    super.key,
+    this.color = QColors.brightGreen,
+    this.background = QColors.softMint,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+  final Color color;
+  final Color background;
+
+  @override
+  Widget build(BuildContext context) {
+    return QCard(
+      onTap: onTap,
+      padding: const EdgeInsets.symmetric(
+        horizontal: QSpace.xs,
+        vertical: QSpace.md,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: background,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, size: 20, color: color),
+          ),
+          const SizedBox(height: QSpace.xs),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: Theme.of(
+              context,
+            ).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class QCard extends StatelessWidget {
   const QCard({
     required this.child,
@@ -348,7 +494,7 @@ class QCard extends StatelessWidget {
       side: BorderSide(
         color:
             borderColor ??
-            (isDark ? const Color(0xFF243A2E) : const Color(0xFFE7F1EB)),
+            (isDark ? const Color(0xFF273449) : const Color(0xFFE4EFF0)),
       ),
     );
     final content = Ink(

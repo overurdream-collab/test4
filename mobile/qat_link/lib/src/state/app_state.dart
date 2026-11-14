@@ -6,7 +6,9 @@ import 'package:flutter/material.dart';
 import '../data/api_models.dart';
 import '../data/qat_link_api.dart';
 import '../data/session_store.dart';
+import '../format.dart';
 import '../models.dart';
+import '../services/local_notification_service.dart';
 
 class AppState extends ChangeNotifier {
   AppState({
@@ -16,7 +18,12 @@ class AppState extends ChangeNotifier {
   }) : _api = api,
        _sessionStore = sessionStore {
     if (_api != null) loggedIn = false;
-    if (seed) _seed();
+    if (seed) {
+      _seed();
+      accountType = AccountType.merchant;
+      accountTypeKnown = true;
+    }
+    if (_sessionStore != null) unawaited(loadStoredAccountType());
   }
 
   final QatLinkApi? _api;
@@ -25,6 +32,10 @@ class AppState extends ChangeNotifier {
   final Map<String, String> relationshipOtherUserIds = {};
   bool _bootstrapped = false;
   bool _personaInitialized = false;
+  Timer? _notificationTimer;
+  bool _pollingNotifications = false;
+  final Set<String> _seenNotificationIds = {};
+  bool _notificationsPrimed = false;
 
   bool get isRemote => _api != null;
   bool get bootstrapped => _bootstrapped;
@@ -45,6 +56,9 @@ class AppState extends ChangeNotifier {
   bool reminderNotificationsEnabled = true;
   bool bannerAdVisible = true;
   bool paidAdVisible = false;
+  bool isAdmin = false;
+  AccountType accountType = AccountType.customer;
+  bool accountTypeKnown = false;
   AppPersona persona = AppPersona.merchant;
   int currentPlanIndex = 1;
   int dailyPhotoCount = 3;
@@ -68,6 +82,7 @@ class AppState extends ChangeNotifier {
   final List<DayPhoto> photos = [];
   final List<SettlementRequest> settlementRequests = [];
   final List<Plan> plans = [];
+  final List<AdminAd> ads = [];
 
   List<Contact> get customers => contacts
       .where((contact) => contact.kind == ContactKind.customer)
@@ -181,6 +196,69 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  void selectAccountType(AccountType value) {
+    accountType = value;
+    accountTypeKnown = true;
+    persona = value.isMerchantSide ? AppPersona.merchant : AppPersona.customer;
+    notifyListeners();
+  }
+
+  Future<void> loadStoredAccountType() async {
+    final stored = _accountTypeFromString(
+      await _sessionStore?.readAccountType(),
+    );
+    if (stored == null) return;
+    accountType = stored;
+    accountTypeKnown = true;
+    persona = stored.isMerchantSide ? AppPersona.merchant : AppPersona.customer;
+    notifyListeners();
+  }
+
+  AccountType? _accountTypeFromString(String? value) {
+    return switch (value) {
+      'customer' => AccountType.customer,
+      'merchant' => AccountType.merchant,
+      'supplier' => AccountType.supplier,
+      _ => null,
+    };
+  }
+
+  void startNotificationPolling() {
+    _notificationTimer?.cancel();
+    if (_api == null) return;
+    _notificationTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => _pollNotifications(),
+    );
+  }
+
+  void stopNotificationPolling() {
+    _notificationTimer?.cancel();
+    _notificationTimer = null;
+  }
+
+  Future<void> _pollNotifications() async {
+    if (_pollingNotifications || remoteLoading || !loggedIn) return;
+    _pollingNotifications = true;
+    try {
+      await _loadRemoteData();
+    } on Object catch (error) {
+      remoteError = error.toString();
+    } finally {
+      _pollingNotifications = false;
+    }
+  }
+
+  Future<void> _applyAccountType(
+    AccountType value, {
+    bool persist = true,
+  }) async {
+    accountType = value;
+    accountTypeKnown = true;
+    persona = value.isMerchantSide ? AppPersona.merchant : AppPersona.customer;
+    if (persist) await _sessionStore?.writeAccountType(value.name);
+  }
+
   void toggleOffline() {
     offline = !offline;
     notifyListeners();
@@ -235,9 +313,20 @@ class AppState extends ChangeNotifier {
         loggedIn = false;
         return;
       }
+      final storedType = _accountTypeFromString(
+        await _sessionStore?.readAccountType(),
+      );
+      if (storedType != null) {
+        accountType = storedType;
+        accountTypeKnown = true;
+        persona = storedType.isMerchantSide
+            ? AppPersona.merchant
+            : AppPersona.customer;
+      }
       api.session = stored;
       await _loadRemoteData();
       loggedIn = true;
+      startNotificationPolling();
     } on ApiException catch (error) {
       remoteError = error.toString();
       if (error.statusCode == 401 || error.statusCode == 403) {
@@ -261,13 +350,18 @@ class AppState extends ChangeNotifier {
     await api.requestOtp(normalizePhoneE164(phone));
   }
 
-  Future<void> verifyOtp({required String phone, required String code}) async {
+  Future<void> verifyOtp({
+    required String phone,
+    required String code,
+    AccountType? accountType,
+  }) async {
     final api = _api;
     final store = _sessionStore;
     if (api == null) {
       login();
       return;
     }
+    final selectedType = accountType ?? this.accountType;
     remoteLoading = true;
     remoteError = null;
     notifyListeners();
@@ -279,10 +373,13 @@ class AppState extends ChangeNotifier {
         deviceId: deviceId,
         deviceLabel: _deviceLabel,
         platform: _platform,
+        accountType: selectedType.name,
       );
       await store?.write(session);
+      await _applyAccountType(selectedType);
       await _loadRemoteData();
       loggedIn = true;
+      startNotificationPolling();
     } finally {
       remoteLoading = false;
       notifyListeners();
@@ -290,6 +387,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    stopNotificationPolling();
     final api = _api;
     if (api != null) {
       try {
@@ -298,6 +396,7 @@ class AppState extends ChangeNotifier {
         remoteError = error.toString();
       }
       await _sessionStore?.clear();
+      await _sessionStore?.rotateDeviceId();
       api.session = null;
       _clearRemoteState();
     }
@@ -305,10 +404,22 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  @override
+  void dispose() {
+    stopNotificationPolling();
+    super.dispose();
+  }
+
   void _clearRemoteState() {
     activeRelationshipId = null;
     _personaInitialized = false;
-    persona = AppPersona.merchant;
+    persona = accountType.isMerchantSide
+        ? AppPersona.merchant
+        : AppPersona.customer;
+    isAdmin = false;
+    ads.clear();
+    _seenNotificationIds.clear();
+    _notificationsPrimed = false;
     remoteError = null;
     user = const AppUser(
       id: meId,
@@ -717,6 +828,20 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> decideInvitation({
+    required String invitationId,
+    required String decision,
+  }) async {
+    final api = _api;
+    if (api == null) return;
+    await api.decideInvitation(
+      invitationId: invitationId,
+      decision: decision,
+      idempotencyKey: generateUuidV4(),
+    );
+    await _loadRemoteData();
+  }
+
   void revokeSession(String id) {
     sessions.removeWhere((session) => session.id == id);
     notifyListeners();
@@ -761,6 +886,12 @@ class AppState extends ChangeNotifier {
     final api = _api;
     if (api == null) return;
     final remoteUser = await api.me();
+    isAdmin = remoteUser.isAdmin;
+    final remoteType = _accountTypeFromString(remoteUser.accountType);
+    if (remoteType != null) {
+      await _applyAccountType(remoteType);
+      _personaInitialized = true;
+    }
     final displayName = remoteUser.displayName?.trim();
     user = AppUser(
       id: remoteUser.id,
@@ -776,7 +907,28 @@ class AppState extends ChangeNotifier {
     final relationships = await api.relationships();
     final devices = await api.devices();
     final invitations = await api.invitations();
+    try {
+      final remoteAds = await api.ads();
+      ads
+        ..clear()
+        ..addAll(
+          remoteAds.map(
+            (ad) => AdminAd(
+              id: ad.id,
+              imageUrl: ad.imageUrl,
+              title: ad.title,
+              sortOrder: ad.sortOrder,
+            ),
+          ),
+        );
+    } on Object {
+      ads.clear();
+    }
 
+    final readNotificationIds = notifications
+        .where((notification) => notification.read)
+        .map((notification) => notification.id)
+        .toSet();
     contacts.clear();
     entries.clear();
     settlementRequests.clear();
@@ -837,6 +989,31 @@ class AppState extends ChangeNotifier {
             relationship.relationshipId,
           ),
         );
+        if (operation.businessState == 'awaiting_counterparty' &&
+            operation.actorUserId != remoteUser.id) {
+          final notificationId = 'operation:${operation.operationId}';
+          final actorName = other.displayName?.trim().isNotEmpty == true
+              ? other.displayName!.trim()
+              : other.phoneE164 != null && other.phoneE164!.isNotEmpty
+              ? formatPhoneLocal(other.phoneE164!)
+              : 'طرف العلاقة';
+          final type = _operationType(operation.operationType);
+          final amount = _operationAmount(operation);
+          notifications.add(
+            AppNotification(
+              id: notificationId,
+              title: 'عملية بانتظار موافقتك',
+              body: '$actorName سجل ${type.label} بمبلغ ${formatMoney(amount)}',
+              kind: NotificationKind.app,
+              at:
+                  operation.serverCreatedAt ??
+                  operation.clientCreatedAt ??
+                  DateTime.now(),
+              read: readNotificationIds.contains(notificationId),
+              relationshipId: relationship.relationshipId,
+            ),
+          );
+        }
       }
 
       final settlement = await api.pendingSettlement(
@@ -855,6 +1032,21 @@ class AppState extends ChangeNotifier {
             serverId: settlement.requestId,
           ),
         );
+        if (!fromMe) {
+          final notificationId = 'settlement:${settlement.requestId}';
+          notifications.add(
+            AppNotification(
+              id: notificationId,
+              title: 'طلب سداد بانتظارك',
+              body:
+                  '${other.displayName?.trim().isNotEmpty == true ? other.displayName!.trim() : 'طرف العلاقة'} أرسل طلب سداد جديد.',
+              kind: NotificationKind.reminder,
+              at: settlement.requestedAt ?? DateTime.now(),
+              read: readNotificationIds.contains(notificationId),
+              relationshipId: relationship.relationshipId,
+            ),
+          );
+        }
       }
     }
 
@@ -873,29 +1065,67 @@ class AppState extends ChangeNotifier {
     );
 
     for (final invitation in invitations) {
+      final notificationId = 'invitation:${invitation.invitationId}';
+      final inviterName = invitation.inviterDisplayName?.trim();
+      final inviterPhone = invitation.inviteePhoneE164.trim();
+      final inviter = inviterName?.isNotEmpty == true
+          ? inviterName!
+          : inviterPhone.isNotEmpty
+          ? formatPhoneLocal(inviterPhone)
+          : 'طرف جديد';
       notifications.add(
         AppNotification(
-          id: invitation.invitationId,
+          id: notificationId,
           title: 'دعوة علاقة بانتظار قرارك',
-          body: invitation.inviterDisplayName ?? invitation.inviterUserId,
+          body: '$inviter يريد ربط حسابه معك على QAT LINK.',
           kind: NotificationKind.app,
-          at: DateTime.now(),
+          at: invitation.expiresAt ?? DateTime.now(),
+          read: readNotificationIds.contains(notificationId),
+          invitationId: invitation.invitationId,
+          relationshipId: invitation.relationshipId,
         ),
       );
     }
 
     if (!_personaInitialized && relationships.isNotEmpty) {
-      persona =
+      final inferred =
           relationships.any(
             (relationship) =>
                 relationship.myRole == 'merchant' ||
                 relationship.myRole == 'supplier',
           )
-          ? AppPersona.merchant
-          : AppPersona.customer;
+          ? AccountType.merchant
+          : AccountType.customer;
+      await _applyAccountType(inferred);
+      _personaInitialized = true;
+    } else if (!_personaInitialized && !accountTypeKnown) {
+      await _applyAccountType(AccountType.customer);
       _personaInitialized = true;
     }
+    _emitNewNotifications();
     notifyListeners();
+  }
+
+  void _emitNewNotifications() {
+    final currentIds = notifications
+        .map((notification) => notification.id)
+        .toSet();
+    if (_notificationsPrimed) {
+      for (final notification in notifications) {
+        if (!notification.read &&
+            !_seenNotificationIds.contains(notification.id)) {
+          unawaited(
+            LocalNotificationService.show(
+              id: notification.id,
+              title: notification.title,
+              body: notification.body,
+            ),
+          );
+        }
+      }
+    }
+    _seenNotificationIds.addAll(currentIds);
+    _notificationsPrimed = true;
   }
 
   ContactKind _contactKindForRole(String role) {

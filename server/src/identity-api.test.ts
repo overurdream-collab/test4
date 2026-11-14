@@ -540,3 +540,125 @@ test("device events are hidden for a device owned by another user", async () => 
   assert.equal(response.statusCode, 404);
   await app.close();
 });
+
+test("OTP verification persists the registration account type once", async () => {
+  let profileValues: unknown[] = [];
+  const pool = makePool(async (sql: string, values: unknown[]) => {
+    if (sql.includes("consume_otp_challenge")) return { rows: [{ verified: true }] };
+    if (sql.includes("get_or_create_user_by_phone")) return { rows: [{ user_id: userId }] };
+    if (sql.includes("UPDATE identity.user_profiles")) {
+      profileValues = values;
+      return { rows: [{ account_type: "supplier" }] };
+    }
+    if (sql.includes("INSERT INTO identity.devices")) return { rows: [{ id: deviceId }] };
+    if (sql.includes("INSERT INTO identity.auth_sessions")) return { rows: [] };
+    if (sql.includes("INSERT INTO identity.refresh_tokens")) return { rows: [] };
+    return { rows: [] };
+  });
+  const app = buildIdentityApi({
+    pool, otpDelivery: { sendCode: async () => undefined }, otpPepper, accessTokenSecret: accessSecret,
+    now: () => 1_800_000_000_000
+  });
+  const response = await app.inject({
+    method: "POST",
+    url: "/v1/auth/otp/verify",
+    payload: {
+      phoneE164: phone,
+      code: "123456",
+      deviceId,
+      deviceLabel: "Test Android",
+      platform: "android",
+      accountType: "supplier"
+    }
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal((JSON.parse(response.body) as { user: { accountType: string } }).user.accountType, "supplier");
+  assert.deepEqual(profileValues, [userId, "supplier"]);
+  await app.close();
+});
+
+test("OTP verification rejects an unknown registration account type before database access", async () => {
+  let calls = 0;
+  const app = buildIdentityApi({
+    pool: makePool(async () => { calls++; return { rows: [] }; }),
+    otpDelivery: { sendCode: async () => undefined }, otpPepper, accessTokenSecret: accessSecret
+  });
+  const response = await app.inject({
+    method: "POST",
+    url: "/v1/auth/otp/verify",
+    payload: {
+      phoneE164: phone,
+      code: "123456",
+      deviceId,
+      deviceLabel: "Test Android",
+      platform: "android",
+      accountType: "owner"
+    }
+  });
+  assert.equal(response.statusCode, 400);
+  assert.equal(calls, 0);
+  await app.close();
+});
+
+test("current profile returns account type and admin capability", async () => {
+  const pool = makePool(async (sql: string) => {
+    if (sql.includes("consume_otp_challenge")) return { rows: [{ verified: true }] };
+    if (sql.includes("get_or_create_user_by_phone")) return { rows: [{ user_id: userId }] };
+    if (sql.includes("UPDATE identity.user_profiles")) return { rows: [{ account_type: "merchant" }] };
+    if (sql.includes("INSERT INTO identity.devices")) return { rows: [{ id: deviceId }] };
+    if (sql.includes("INSERT INTO identity.auth_sessions")) return { rows: [] };
+    if (sql.includes("INSERT INTO identity.refresh_tokens")) return { rows: [] };
+    if (sql.includes("FROM identity.auth_sessions s")) {
+      return { rows: [{ user_id: userId, device_id: deviceId, device_status: "active", session_revoked_at: null }] };
+    }
+    if (sql.includes("FROM identity.users u")) {
+      return {
+        rows: [{
+          user_id: userId,
+          phone_e164: phone,
+          display_name: "متجر الاختبار",
+          locale: "ar",
+          account_type: "merchant",
+          is_admin: true,
+          device_id: deviceId
+        }]
+      };
+    }
+    return { rows: [] };
+  });
+  const app = buildIdentityApi({
+    pool, otpDelivery: { sendCode: async () => undefined }, otpPepper, accessTokenSecret: accessSecret,
+    now: () => 1_800_000_000_000
+  });
+  const login = await app.inject({
+    method: "POST",
+    url: "/v1/auth/otp/verify",
+    payload: {
+      phoneE164: phone,
+      code: "123456",
+      deviceId,
+      deviceLabel: "Test Android",
+      platform: "android",
+      accountType: "merchant"
+    }
+  });
+  const token = (JSON.parse(login.body) as { accessToken: string }).accessToken;
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/me",
+    headers: { authorization: "Bearer " + token }
+  });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(JSON.parse(response.body), {
+    user: {
+      id: userId,
+      phoneE164: phone,
+      displayName: "متجر الاختبار",
+      locale: "ar",
+      accountType: "merchant",
+      isAdmin: true
+    },
+    deviceId
+  });
+  await app.close();
+});

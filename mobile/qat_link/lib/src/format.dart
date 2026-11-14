@@ -81,6 +81,15 @@ String formatDateTime(DateTime value) {
 String monthLabel(DateTime value) =>
     '${_months[value.month - 1]} ${value.year}';
 
+String formatPhoneLocal(String value) {
+  final digits = value.replaceAll(RegExp(r'[^0-9]'), '');
+  final local = digits.startsWith('967') ? digits.substring(3) : digits;
+  if (local.length == 9) {
+    return '${local.substring(0, 3)} ${local.substring(3, 6)} ${local.substring(6)}';
+  }
+  return local;
+}
+
 String initials(String value) {
   final parts = value.trim().split(RegExp(r'\s+'));
   if (parts.isEmpty || parts.first.isEmpty) return '؟';

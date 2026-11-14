@@ -8,6 +8,7 @@ import 'design/theme.dart';
 import 'state/app_state.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/shared/home_shell.dart';
+import 'services/local_notification_service.dart';
 
 class QatLinkApp extends StatefulWidget {
   const QatLinkApp({super.key, this.state});
@@ -24,6 +25,7 @@ class _QatLinkAppState extends State<QatLinkApp> {
   @override
   void initState() {
     super.initState();
+    unawaited(LocalNotificationService.requestPermission());
     if (_state.isRemote) unawaited(_state.bootstrap());
   }
 

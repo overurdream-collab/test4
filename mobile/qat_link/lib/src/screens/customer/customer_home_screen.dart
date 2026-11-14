@@ -5,9 +5,9 @@ import '../../design/tokens.dart';
 import '../../format.dart';
 import '../../models.dart';
 import '../../state/app_state.dart';
+import '../shared/admin_ads_carousel.dart';
 import '../shared/notifications_screen.dart';
 import '../shared/photos_screen.dart';
-import '../shared/profile_switch_sheet.dart';
 import '../shared/statement_screen.dart';
 import 'customer_merchants_screen.dart';
 import 'payment_screen.dart';
@@ -26,13 +26,32 @@ class CustomerHomeScreen extends StatelessWidget {
       (total, merchant) => total + merchant.creditLimitMinor,
     );
     final used = state.customerApprovedTotal + state.customerPendingTotal;
+    final now = DateTime.now();
+    final todayEntries = state.customerEntries.where(
+      (entry) =>
+          entry.createdAt.year == now.year &&
+          entry.createdAt.month == now.month &&
+          entry.createdAt.day == now.day,
+    );
+    final todayPayments = todayEntries
+        .where(
+          (entry) =>
+              entry.status == TxStatus.approved &&
+              (entry.type == OperationType.payment ||
+                  entry.type == OperationType.refund ||
+                  entry.type == OperationType.salesReturn),
+        )
+        .fold<int>(0, (total, entry) => total + entry.amountMinor);
+    final todayPending = todayEntries
+        .where((entry) => entry.status == TxStatus.pending)
+        .length;
 
     return Scaffold(
       appBar: AppBar(
         titleSpacing: QSpace.lg,
         title: Row(
           children: [
-            const QLogoMark(size: 34),
+            const QBrandAvatar(size: 34),
             const SizedBox(width: QSpace.sm),
             Text(
               'QAT LINK',
@@ -59,20 +78,7 @@ class CustomerHomeScreen extends StatelessWidget {
           ),
           Padding(
             padding: const EdgeInsetsDirectional.only(end: QSpace.lg),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(16),
-              onTap: () => showModalBottomSheet<void>(
-                context: context,
-                backgroundColor: Theme.of(context).colorScheme.surface,
-                shape: const RoundedRectangleBorder(
-                  borderRadius: BorderRadius.vertical(
-                    top: Radius.circular(QRadius.xl),
-                  ),
-                ),
-                builder: (_) => const ProfileSwitchSheet(),
-              ),
-              child: QAvatar(label: state.user.name, size: 38),
-            ),
+            child: QAvatar(label: state.user.name, size: 38),
           ),
         ],
       ),
@@ -93,14 +99,11 @@ class CustomerHomeScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'مساء الخير، ${state.user.name.split(' ').first}',
-                    style: Theme.of(context).textTheme.headlineSmall,
-                  ),
-                  Text(
-                    'هذا ملخص حسابك لدى التجار.',
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
+                  _WelcomeCard(state: state),
+                  if (state.ads.isNotEmpty) ...[
+                    const SizedBox(height: QSpace.lg),
+                    AdminAdsCarousel(ads: state.ads),
+                  ],
                   const SizedBox(height: QSpace.lg),
                   _BalanceCard(state: state, limit: limit, used: used),
                   const SizedBox(height: QSpace.lg),
@@ -132,6 +135,35 @@ class CustomerHomeScreen extends StatelessWidget {
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: QSpace.md),
+                  _CustomerQuickActions(
+                    onPhotos: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const PhotosScreen(),
+                      ),
+                    ),
+                    onStatement: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const StatementScreen(),
+                      ),
+                    ),
+                    onSettlement: () => _requestSettlement(context, state),
+                    onNotifications: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const NotificationsScreen(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: QSpace.xl),
+                  _TodaySection(
+                    payments: todayPayments,
+                    pending: todayPending,
+                    onStatement: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const StatementScreen(),
+                      ),
+                    ),
                   ),
                   if (pending.isNotEmpty) ...[
                     const SizedBox(height: QSpace.lg),
@@ -175,7 +207,7 @@ class CustomerHomeScreen extends StatelessWidget {
                   const SizedBox(height: QSpace.xl),
                   QSectionHeader(
                     title: 'نشاطك الأخير',
-                    actionLabel: 'الكشف',
+                    actionLabel: 'الحركة',
                     onAction: () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
                         builder: (_) => const StatementScreen(),
@@ -202,20 +234,6 @@ class CustomerHomeScreen extends StatelessWidget {
                               ],
                             ],
                           ),
-                  ),
-                  const SizedBox(height: QSpace.xl),
-                  _ActionsGrid(
-                    onPhotos: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => const PhotosScreen(),
-                      ),
-                    ),
-                    onStatement: () => Navigator.of(context).push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => const StatementScreen(),
-                      ),
-                    ),
-                    onSettlement: () => _requestSettlement(context, state),
                   ),
                 ],
               ),
@@ -275,7 +293,12 @@ class _BalanceCard extends StatelessWidget {
                     QMoney(
                       minor: state.customerApprovedTotal,
                       style: Theme.of(context).textTheme.headlineMedium
-                          ?.copyWith(fontWeight: FontWeight.w800),
+                          ?.copyWith(
+                            fontWeight: FontWeight.w800,
+                            color: state.customerApprovedTotal > 0
+                                ? QColors.rejectedFg
+                                : QColors.charcoal,
+                          ),
                     ),
                     const SizedBox(height: QSpace.xs),
                     if (pending > 0)
@@ -419,60 +442,230 @@ class _PendingCard extends StatelessWidget {
   }
 }
 
-class _ActionsGrid extends StatelessWidget {
-  const _ActionsGrid({
+class _WelcomeCard extends StatelessWidget {
+  const _WelcomeCard({required this.state});
+
+  final AppState state;
+
+  @override
+  Widget build(BuildContext context) {
+    return QCard(
+      gradient: const LinearGradient(
+        begin: Alignment.topRight,
+        end: Alignment.bottomLeft,
+        colors: [QColors.softMint, QColors.pureWhite],
+      ),
+      child: Row(
+        children: [
+          const QBrandAvatar(size: 62),
+          const SizedBox(width: QSpace.md),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  state.user.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  formatPhoneLocal(state.user.phone),
+                  textDirection: TextDirection.ltr,
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: QColors.neutralGray,
+                    letterSpacing: 0.4,
+                  ),
+                ),
+                const SizedBox(height: QSpace.xs),
+                Text(
+                  'هذا ملخص حسابك لدى التجار.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: QSpace.sm,
+              vertical: 4,
+            ),
+            decoration: BoxDecoration(
+              color: QColors.brightGreen.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(QRadius.pill),
+            ),
+            child: Text(
+              state.accountType.label,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: QColors.brightGreen,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CustomerQuickActions extends StatelessWidget {
+  const _CustomerQuickActions({
     required this.onPhotos,
     required this.onStatement,
     required this.onSettlement,
+    required this.onNotifications,
   });
 
   final VoidCallback onPhotos;
   final VoidCallback onStatement;
   final VoidCallback onSettlement;
+  final VoidCallback onNotifications;
 
   @override
   Widget build(BuildContext context) {
     final actions = [
-      (
-        label: 'كشف الحساب',
-        icon: Icons.description_outlined,
-        onTap: onStatement,
-      ),
+      (label: 'الحركة', icon: Icons.swap_horiz_rounded, onTap: onStatement),
       (label: 'صور اليوم', icon: Icons.photo_library_outlined, onTap: onPhotos),
       (label: 'طلب سداد', icon: Icons.handshake_outlined, onTap: onSettlement),
       (
         label: 'الإشعارات',
         icon: Icons.notifications_none_rounded,
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute<void>(builder: (_) => const NotificationsScreen()),
-        ),
+        onTap: onNotifications,
       ),
     ];
-    return GridView.count(
-      crossAxisCount: 4,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      mainAxisSpacing: QSpace.sm,
-      crossAxisSpacing: QSpace.sm,
-      childAspectRatio: 0.9,
+    return Row(
       children: [
-        for (final action in actions)
-          QCard(
-            onTap: action.onTap,
-            padding: const EdgeInsets.all(QSpace.sm),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(action.icon, color: QColors.brightGreen),
-                const SizedBox(height: QSpace.xs),
-                Text(
-                  action.label,
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.labelSmall,
-                ),
-              ],
+        for (var index = 0; index < actions.length; index++) ...[
+          Expanded(
+            child: QQuickAction(
+              icon: actions[index].icon,
+              label: actions[index].label,
+              onTap: actions[index].onTap,
             ),
           ),
+          if (index != actions.length - 1) const SizedBox(width: QSpace.sm),
+        ],
+      ],
+    );
+  }
+}
+
+class _TodaySection extends StatelessWidget {
+  const _TodaySection({
+    required this.payments,
+    required this.pending,
+    required this.onStatement,
+  });
+
+  final int payments;
+  final int pending;
+  final VoidCallback onStatement;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        QSectionHeader(
+          title: 'اليوم',
+          subtitle: formatDate(DateTime.now()),
+          actionLabel: 'الحركة',
+          onAction: onStatement,
+        ),
+        Row(
+          children: [
+            Expanded(
+              child: QCard(
+                padding: const EdgeInsets.all(QSpace.md),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: QColors.approvedBg,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.south_west_rounded,
+                        size: 19,
+                        color: QColors.approvedFg,
+                      ),
+                    ),
+                    const SizedBox(width: QSpace.sm),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            formatCompactMoney(payments),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(
+                                  color: QColors.approvedFg,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                          ),
+                          Text(
+                            'دفعات اليوم',
+                            style: Theme.of(context).textTheme.labelSmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: QSpace.sm),
+            Expanded(
+              child: QCard(
+                padding: const EdgeInsets.all(QSpace.md),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: QColors.pendingBg,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.schedule_rounded,
+                        size: 19,
+                        color: QColors.pendingFg,
+                      ),
+                    ),
+                    const SizedBox(width: QSpace.sm),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '$pending',
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(
+                                  color: QColors.pendingFg,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                          ),
+                          Text(
+                            'بانتظار موافقتك',
+                            style: Theme.of(context).textTheme.labelSmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ],
     );
   }

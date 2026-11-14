@@ -79,11 +79,8 @@ void main() {
       baseUri: Uri.parse('https://api.qatlink.test'),
       client: MockClient(_handler),
     );
-    final state = AppState(
-      seed: false,
-      api: api,
-      sessionStore: MemoryQatLinkSessionStore(deviceId: 'device-1'),
-    );
+    final store = MemoryQatLinkSessionStore(deviceId: 'device-1');
+    final state = AppState(seed: false, api: api, sessionStore: store);
 
     await state.verifyOtp(phone: '+967 700 000 001', code: '123456');
     expect(state.contacts, isNotEmpty);
@@ -91,6 +88,7 @@ void main() {
 
     await state.logout();
 
+    expect(await store.deviceId(), isNot('device-1'));
     expect(state.loggedIn, isFalse);
     expect(state.contacts, isEmpty);
     expect(state.entries, isEmpty);

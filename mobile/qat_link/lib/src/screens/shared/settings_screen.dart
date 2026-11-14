@@ -5,12 +5,8 @@ import '../../design/tokens.dart';
 import '../../models.dart';
 import '../../state/app_state.dart';
 import '../admin/admin_dashboard_screen.dart';
-import '../merchant/employees_screen.dart';
-import '../merchant/suppliers_screen.dart';
 import '../shared/brand_gallery_screen.dart';
 import '../shared/devices_screen.dart';
-import '../shared/photos_screen.dart';
-import '../shared/profile_switch_sheet.dart';
 import '../shared/states_gallery_screen.dart';
 import '../shared/statement_screen.dart';
 import 'plans_screen.dart';
@@ -21,32 +17,12 @@ class SettingsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = QScope.of(context);
-    final isMerchant = state.persona == AppPersona.merchant;
     final plan = state.plans.isEmpty
         ? null
         : state.plans[state.currentPlanIndex];
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('الإعدادات'),
-        actions: [
-          IconButton(
-            tooltip: 'تبديل الملف',
-            onPressed: () => showModalBottomSheet<void>(
-              context: context,
-              backgroundColor: Theme.of(context).colorScheme.surface,
-              shape: const RoundedRectangleBorder(
-                borderRadius: BorderRadius.vertical(
-                  top: Radius.circular(QRadius.xl),
-                ),
-              ),
-              builder: (_) => const ProfileSwitchSheet(),
-            ),
-            icon: const Icon(Icons.swap_horiz_rounded),
-          ),
-          const SizedBox(width: QSpace.sm),
-        ],
-      ),
+      appBar: AppBar(title: const Text('الإعدادات')),
       body: ListView(
         padding: const EdgeInsets.only(bottom: QSpace.xxl),
         children: [
@@ -88,68 +64,30 @@ class SettingsScreen extends StatelessWidget {
                         onChanged: (_) => state.toggleHideAmounts(),
                       ),
                       const Divider(),
-                      SwitchListTile(
-                        secondary: const Icon(Icons.notifications_none_rounded),
-                        title: const Text('إشعارات التطبيق'),
-                        subtitle: const Text('العمليات والموافقات الجديدة'),
-                        value: state.appNotificationsEnabled,
-                        onChanged: state.toggleAppNotifications,
+                      const SwitchListTile(
+                        secondary: Icon(Icons.notifications_none_rounded),
+                        title: Text('إشعارات التطبيق'),
+                        subtitle: Text(
+                          'إلزامية لجميع الحسابات لضمان وصول الموافقات',
+                        ),
+                        value: true,
+                        onChanged: null,
                       ),
-                      const Divider(),
-                      SwitchListTile(
-                        secondary: const Icon(Icons.alarm_rounded),
-                        title: const Text('تذكيرات الديون'),
-                        subtitle: const Text('تنبيه لطيف بالمبالغ المعلقة'),
-                        value: state.reminderNotificationsEnabled,
-                        onChanged: state.toggleReminderNotifications,
-                      ),
+                      if (state.accountType == AccountType.merchant) ...[
+                        const Divider(),
+                        SwitchListTile(
+                          secondary: const Icon(Icons.alarm_rounded),
+                          title: const Text('تنبيهات التاجر'),
+                          subtitle: const Text(
+                            'يمكن تعطيلها دون التأثير على بقية الإشعارات',
+                          ),
+                          value: state.reminderNotificationsEnabled,
+                          onChanged: state.toggleReminderNotifications,
+                        ),
+                      ],
                     ],
                   ),
                 ),
-                if (isMerchant) ...[
-                  const SizedBox(height: QSpace.lg),
-                  const _SectionLabel(label: 'إدارة النشاط'),
-                  QCard(
-                    padding: EdgeInsets.zero,
-                    child: Column(
-                      children: [
-                        _SettingsTile(
-                          icon: Icons.store_mall_directory_outlined,
-                          title: 'الموردون',
-                          subtitle: '${state.suppliers.length} مورد',
-                          onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) => const SuppliersScreen(),
-                            ),
-                          ),
-                        ),
-                        const Divider(),
-                        _SettingsTile(
-                          icon: Icons.badge_outlined,
-                          title: 'الموظفون والصلاحيات',
-                          subtitle: '${state.employees.length} موظف',
-                          onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) => const EmployeesScreen(),
-                            ),
-                          ),
-                        ),
-                        const Divider(),
-                        _SettingsTile(
-                          icon: Icons.photo_library_outlined,
-                          title: 'صور اليوم',
-                          subtitle:
-                              '${state.todayPhotos} من ${state.dailyPhotoLimit} صور',
-                          onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) => const PhotosScreen(),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
                 const SizedBox(height: QSpace.lg),
                 const _SectionLabel(label: 'الحساب والاشتراك'),
                 QCard(
@@ -170,7 +108,7 @@ class SettingsScreen extends StatelessWidget {
                       const Divider(),
                       _SettingsTile(
                         icon: Icons.description_outlined,
-                        title: 'كشف الحساب',
+                        title: 'الحركة',
                         subtitle: 'تصدير ومراجعة كل الحركات',
                         onTap: () => Navigator.of(context).push(
                           MaterialPageRoute<void>(
@@ -192,48 +130,50 @@ class SettingsScreen extends StatelessWidget {
                     ],
                   ),
                 ),
-                const SizedBox(height: QSpace.lg),
-                const _SectionLabel(label: 'الهوية والتجربة'),
-                QCard(
-                  padding: EdgeInsets.zero,
-                  child: Column(
-                    children: [
-                      _SettingsTile(
-                        icon: Icons.auto_awesome_mosaic_outlined,
-                        title: 'مفاهيم الشعار',
-                        subtitle: 'ثلاثة اتجاهات بصرية جاهزة',
-                        onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => const BrandGalleryScreen(),
+                if (state.isAdmin) ...[
+                  const SizedBox(height: QSpace.lg),
+                  const _SectionLabel(label: 'الهوية والتجربة'),
+                  QCard(
+                    padding: EdgeInsets.zero,
+                    child: Column(
+                      children: [
+                        _SettingsTile(
+                          icon: Icons.auto_awesome_mosaic_outlined,
+                          title: 'مفاهيم الشعار',
+                          subtitle: 'ثلاثة اتجاهات بصرية جاهزة',
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const BrandGalleryScreen(),
+                            ),
                           ),
                         ),
-                      ),
-                      const Divider(),
-                      _SettingsTile(
-                        icon: Icons.grid_view_rounded,
-                        title: 'معرض حالات الواجهة',
-                        subtitle: 'فارغ • تحميل • خطأ • دون إنترنت',
-                        onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => const StatesGalleryScreen(),
+                        const Divider(),
+                        _SettingsTile(
+                          icon: Icons.grid_view_rounded,
+                          title: 'معرض حالات الواجهة',
+                          subtitle: 'فارغ • تحميل • خطأ • دون إنترنت',
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const StatesGalleryScreen(),
+                            ),
                           ),
                         ),
-                      ),
-                      const Divider(),
-                      _SettingsTile(
-                        icon: Icons.admin_panel_settings_outlined,
-                        title: 'معاينة لوحة الإدارة',
-                        subtitle: 'واجهة ويب مستقلة',
-                        badge: 'Web',
-                        onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => const AdminDashboardScreen(),
+                        const Divider(),
+                        _SettingsTile(
+                          icon: Icons.admin_panel_settings_outlined,
+                          title: 'معاينة لوحة الإدارة',
+                          subtitle: 'واجهة ويب مستقلة',
+                          badge: 'Web',
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const AdminDashboardScreen(),
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
+                ],
                 const SizedBox(height: QSpace.lg),
                 QCard(
                   padding: EdgeInsets.zero,
@@ -336,47 +276,58 @@ class _ProfileCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return QCard(
       gradient: const LinearGradient(
+        begin: Alignment.topRight,
+        end: Alignment.bottomLeft,
         colors: [QColors.softMint, QColors.pureWhite],
       ),
-      child: Row(
+      child: Column(
         children: [
-          QAvatar(label: state.user.name, size: 58),
-          const SizedBox(width: QSpace.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  state.user.storeName,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                Text(
-                  state.user.name,
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '${state.user.category} • ${state.user.address}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelSmall,
-                ),
-              ],
-            ),
-          ),
-          IconButton(
-            tooltip: 'تبديل الملف',
-            onPressed: () => showModalBottomSheet<void>(
-              context: context,
-              backgroundColor: Theme.of(context).colorScheme.surface,
-              shape: const RoundedRectangleBorder(
-                borderRadius: BorderRadius.vertical(
-                  top: Radius.circular(QRadius.xl),
+          Stack(
+            clipBehavior: Clip.none,
+            children: [
+              const QBrandAvatar(size: 88, showGlow: true),
+              Positioned(
+                bottom: 0,
+                left: 0,
+                child: Container(
+                  width: 30,
+                  height: 30,
+                  decoration: BoxDecoration(
+                    color: QColors.brightGreen,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: QColors.pureWhite, width: 2),
+                  ),
+                  child: const Icon(
+                    Icons.camera_alt_outlined,
+                    size: 15,
+                    color: QColors.charcoal,
+                  ),
                 ),
               ),
-              builder: (_) => const ProfileSwitchSheet(),
+            ],
+          ),
+          const SizedBox(height: QSpace.md),
+          Text(
+            state.user.storeName,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: 2),
+          Text(
+            state.user.name,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: QSpace.xs),
+          Text(
+            '${state.accountType.label} • ${state.user.category}',
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              color: QColors.brightGreen,
+              fontWeight: FontWeight.w700,
             ),
-            icon: const Icon(Icons.edit_outlined),
           ),
         ],
       ),
