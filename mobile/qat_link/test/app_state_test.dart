@@ -30,6 +30,41 @@ void main() {
       expect(state.merchantEntries.single.status, TxStatus.approved);
     });
 
+    test('keeps an overpayment as a signed credit balance', () {
+      final state = AppState(seed: false);
+      state.addCustomer(
+        name: 'عميل تجريبي',
+        phone: '+967 700 000 004',
+        hasApp: true,
+      );
+      final customer = state.customers.single;
+
+      state.addDebt(
+        customerId: customer.id,
+        amountMinor: 1000000,
+        date: DateTime(2026, 11, 4),
+      );
+      state.approveEntry(state.merchantEntries.single.id);
+      expect(state.customers.single.balanceMinor, 1000000);
+
+      state.entries.add(
+        LedgerEntry(
+          id: 'overpayment',
+          customerId: customer.id,
+          merchantId: AppState.merchantId,
+          type: OperationType.payment,
+          amountMinor: 1500000,
+          status: TxStatus.pending,
+          createdAt: DateTime(2026, 11, 4, 1),
+          createdByMe: false,
+        ),
+      );
+      state.approveEntry('overpayment');
+
+      expect(state.customers.single.balanceMinor, -500000);
+      expect(state.customers.single.pendingMinor, 0);
+    });
+
     test('rejects a pending debt without changing the balance', () {
       final state = AppState(seed: false);
       state.addCustomer(

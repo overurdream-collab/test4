@@ -575,7 +575,7 @@ class AppState extends ChangeNotifier {
       _replaceContact(
         customer,
         customer.copyWith(
-          balanceMinor: nextBalance < 0 ? 0 : nextBalance,
+          balanceMinor: nextBalance,
           pendingMinor: (customer.pendingMinor - entry.amountMinor).clamp(
             0,
             1 << 62,
