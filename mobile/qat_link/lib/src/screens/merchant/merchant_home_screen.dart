@@ -178,10 +178,7 @@ class _StoreCard extends StatelessWidget {
     final collected = <String, int>{};
     for (final entry in state.merchantEntries) {
       if (entry.status != TxStatus.approved) continue;
-      if (entry.type != OperationType.payment &&
-          state.effectOf(entry) != OperationEffect.decrease) {
-        continue;
-      }
+      if (entry.type != OperationType.allocation) continue;
       collected[entry.currency] =
           (collected[entry.currency] ?? 0) + entry.amountMinor;
     }
@@ -457,10 +454,9 @@ class _TodaySection extends StatelessWidget {
       if (effect == OperationEffect.increase) {
         charges[entry.currency] =
             (charges[entry.currency] ?? 0) + state.effectAmountOf(entry);
-      } else if (entry.type == OperationType.payment ||
-          effect == OperationEffect.decrease) {
+      } else if (entry.type == OperationType.payment) {
         payments[entry.currency] =
-            (payments[entry.currency] ?? 0) + state.effectAmountOf(entry);
+            (payments[entry.currency] ?? 0) + entry.amountMinor;
       }
     }
     final pending = todayEntries
@@ -497,7 +493,7 @@ class _TodaySection extends StatelessWidget {
             Expanded(
               child: _MetricCard(
                 icon: Icons.south_west_rounded,
-                label: 'تحصيل',
+                label: 'دفعات',
                 value: formatMoneyTotals(
                   payments,
                   hidden: state.hideAmounts,
@@ -602,7 +598,7 @@ class _ActivityCard extends StatelessWidget {
         children: [
           const QSectionHeader(
             title: 'حركة الأسبوع',
-            subtitle: 'إجمالي الحركات المعتمدة',
+            subtitle: 'حجم الأثر المالي المعتمد',
             padding: EdgeInsets.zero,
           ),
           const SizedBox(height: QSpace.md),
@@ -662,14 +658,10 @@ class _ActivityCard extends StatelessWidget {
       now.month,
       now.day,
     ).subtract(const Duration(days: 6));
-    final totals = <String, int>{};
-    for (final entry in state.merchantEntries) {
-      if (entry.status != TxStatus.approved) continue;
-      if (entry.createdAt.isBefore(start)) continue;
-      totals[entry.currency] =
-          (totals[entry.currency] ?? 0) + entry.amountMinor;
-    }
-    return totals;
+    final weekEntries = state.merchantEntries
+        .where((entry) => !entry.createdAt.isBefore(start))
+        .toList();
+    return state.grossApprovedEffectByCurrency(weekEntries);
   }
 }
 

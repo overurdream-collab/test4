@@ -43,10 +43,7 @@ class CustomerHomeScreen extends StatelessWidget {
     final todayPayments = <String, int>{};
     for (final entry in todayEntries) {
       if (entry.status != TxStatus.approved) continue;
-      if (entry.type != OperationType.payment &&
-          state.effectOf(entry) != OperationEffect.decrease) {
-        continue;
-      }
+      if (entry.type != OperationType.payment) continue;
       todayPayments[entry.currency] =
           (todayPayments[entry.currency] ?? 0) + entry.amountMinor;
     }

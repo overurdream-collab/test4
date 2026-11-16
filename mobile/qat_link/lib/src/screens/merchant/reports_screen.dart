@@ -51,10 +51,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
       approvedEntries,
       OperationEffect.decrease,
     );
-    final unappliedPayments = _typeTotals(
-      approvedEntries,
-      OperationType.payment,
-    );
+    final unappliedPayments = state.unappliedPaymentTotals(allEntries);
     final pending = _pendingTotals(state, entries);
     final approvedCount = approvedEntries.length;
     final contacts = isMerchant ? state.customers : state.customerMerchants;
@@ -172,19 +169,6 @@ class _ReportsScreenState extends State<ReportsScreen> {
       if (state.effectOf(entry) != effect) continue;
       totals[entry.currency] =
           (totals[entry.currency] ?? 0) + state.effectAmountOf(entry);
-    }
-    return totals;
-  }
-
-  Map<String, int> _typeTotals(
-    Iterable<LedgerEntry> entries,
-    OperationType type,
-  ) {
-    final totals = <String, int>{};
-    for (final entry in entries) {
-      if (entry.type != type) continue;
-      totals[entry.currency] =
-          (totals[entry.currency] ?? 0) + entry.amountMinor;
     }
     return totals;
   }

@@ -48,6 +48,70 @@ void main() {
     expect(state.sessions.single.current, isTrue);
   });
 
+  test('remote customer balances are normalized to debt-positive', () async {
+    final api = QatLinkApi(
+      baseUri: Uri.parse('https://api.qatlink.test'),
+      client: MockClient((request) async {
+        final path = request.url.path;
+        if (path == '/v1/relationships') {
+          return _json({
+            'relationships': [
+              {
+                'relationshipId': 'rel-1',
+                'relationshipType': 'merchant_customer',
+                'status': 'active',
+                'currentCycleId': 'cycle-1',
+                'myRole': 'customer',
+                'otherParty': {
+                  'userId': 'user-2',
+                  'role': 'merchant',
+                  'displayName': 'مؤسسة النخبة للقات',
+                  'phoneE164': '+967700000002',
+                },
+              },
+            ],
+          });
+        }
+        if (path == '/v1/relationships/rel-1/account-cycles') {
+          return _json({
+            'currentCycleId': 'cycle-1',
+            'cycles': [
+              {
+                'cycleId': 'cycle-1',
+                'cycleNumber': 1,
+                'title': 'الدورة الحالية',
+                'status': 'active',
+                'balances': [
+                  {
+                    'ownerUserId': 'user-1',
+                    'currency': 'YER',
+                    'receivableMinor': '0',
+                    'payableMinor': '1200000',
+                    'partyBalanceMinor': '-1200000',
+                    'unappliedPaymentAssetMinor': '0',
+                    'unappliedPaymentLiabilityMinor': '0',
+                  },
+                ],
+              },
+            ],
+          });
+        }
+        return _handler(request);
+      }),
+    );
+    final state = AppState(
+      seed: false,
+      api: api,
+      sessionStore: MemoryQatLinkSessionStore(deviceId: 'device-1'),
+    );
+
+    await state.verifyOtp(phone: '+967 700 000 001', code: '123456');
+
+    expect(state.contacts.single.kind, ContactKind.merchant);
+    expect(state.contacts.single.balanceFor('YER'), 1200000);
+    expect(state.contacts.single.balanceMinor, 1200000);
+  });
+
   test('bootstrap restores a stored session before loading data', () async {
     final session = AuthSession(
       accessToken: 'access-1',
@@ -110,8 +174,7 @@ void main() {
       baseUri: Uri.parse('https://api.qatlink.test'),
       client: MockClient((request) async {
         final path = request.url.path;
-        if (path ==
-            '/v1/relationships/rel-1/operations/op-1/decision') {
+        if (path == '/v1/relationships/rel-1/operations/op-1/decision') {
           decided = true;
           return _json({'status': 'approved'});
         }

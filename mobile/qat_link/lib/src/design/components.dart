@@ -1010,7 +1010,7 @@ class QEntryTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                  '$sign ${formatMoney(effect.apply(state.effectAmountOf(entry)).abs(), currency: entry.currency, hidden: state.hideAmounts)}',
+                  '$sign ${formatMoney(isNeutral ? state.effectAmountOf(entry) : effect.apply(state.effectAmountOf(entry)).abs(), currency: entry.currency, hidden: state.hideAmounts)}',
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     color: amountColor,
                     fontWeight: FontWeight.w700,

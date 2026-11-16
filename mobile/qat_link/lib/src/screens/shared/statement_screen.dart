@@ -79,6 +79,13 @@ class _StatementScreenState extends State<StatementScreen> {
       for (final currency in {...approved.keys, ...pending.keys})
         currency: (approved[currency] ?? 0) + (pending[currency] ?? 0),
     };
+    final contactEntries = allEntries.where((entry) {
+      return _contactId == null ||
+          (isMerchant
+              ? entry.customerId == _contactId
+              : entry.merchantId == _contactId);
+    }).toList();
+    final unapplied = state.unappliedPaymentTotals(contactEntries);
 
     final groups = <String, List<LedgerEntry>>{};
     for (final entry in entries) {
@@ -129,6 +136,7 @@ class _StatementScreenState extends State<StatementScreen> {
                     approved: approved,
                     pending: pending,
                     total: total,
+                    unapplied: unapplied,
                     count: entries.length,
                     periodLabel: _periodLabel(),
                     selectedContact: selectedContact,
@@ -359,14 +367,17 @@ class _StatementScreenState extends State<StatementScreen> {
   ) async {
     final pageContext = context;
     final csv = StringBuffer()
-      ..writeln('التاريخ,النوع,الحالة,العملة,الأثر,المبلغ,البيان');
+      ..writeln(
+        'التاريخ,النوع,الحالة,العملة,المبلغ الأصلي,الأثر,صافي الأثر,البيان',
+      );
     for (final entry in entries) {
       final effect = state.effectOf(entry);
-      final signed = effect.apply(state.effectAmountOf(entry));
+      final amount = state.effectAmountOf(entry);
+      final signed = effect.apply(amount);
       csv.writeln(
         '${formatDate(entry.createdAt)},${entry.type.label},${entry.status.label},'
-        '${entry.currency},${effect.label},'
-        '${(signed / 100).toStringAsFixed(2)},'
+        '${entry.currency},${(amount / 100).toStringAsFixed(2)},'
+        '${effect.label},${(signed / 100).toStringAsFixed(2)},'
         '${(entry.productName ?? entry.note ?? '').replaceAll(',', ' ')}',
       );
     }
@@ -431,6 +442,7 @@ class _SummaryCard extends StatelessWidget {
     required this.approved,
     required this.pending,
     required this.total,
+    required this.unapplied,
     required this.count,
     required this.periodLabel,
     required this.selectedContact,
@@ -440,6 +452,7 @@ class _SummaryCard extends StatelessWidget {
   final Map<String, int> approved;
   final Map<String, int> pending;
   final Map<String, int> total;
+  final Map<String, int> unapplied;
   final int count;
   final String periodLabel;
   final Contact? selectedContact;
@@ -527,6 +540,37 @@ class _SummaryCard extends StatelessWidget {
               ),
             ],
           ),
+          if (unapplied.isNotEmpty) ...[
+            const SizedBox(height: QSpace.md),
+            Row(
+              children: [
+                const Icon(
+                  Icons.account_balance_wallet_outlined,
+                  size: 16,
+                  color: QColors.pendingFg,
+                ),
+                const SizedBox(width: QSpace.xs),
+                Expanded(
+                  child: Text(
+                    'دفعات غير مخصصة',
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
+                ),
+                Text(
+                  formatMoneyTotals(
+                    unapplied,
+                    hidden: state.hideAmounts,
+                    compact: true,
+                  ),
+                  textAlign: TextAlign.end,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: QColors.pendingFg,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ],
           if (selectedContact != null) ...[
             const SizedBox(height: QSpace.md),
             Row(

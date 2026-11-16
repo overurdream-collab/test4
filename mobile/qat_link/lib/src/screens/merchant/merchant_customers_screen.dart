@@ -38,7 +38,7 @@ class _MerchantCustomersScreenState extends State<MerchantCustomersScreen> {
           customer.phone.contains(query);
       final matchesFilter = switch (_filter) {
         1 => customer.favorite,
-        2 => customer.pendingByCurrencyMinor.values.any((value) => value > 0),
+        2 => customer.pendingByCurrencyMinor.values.any((value) => value != 0),
         3 => !customer.hasApp,
         _ => true,
       };

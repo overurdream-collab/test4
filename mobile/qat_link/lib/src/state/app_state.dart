@@ -197,11 +197,56 @@ class AppState extends ChangeNotifier {
   int signedEffectOf(LedgerEntry entry) =>
       effectOf(entry).apply(effectAmountOf(entry));
 
-  LedgerEntry? _entryById(String id) {
+  LedgerEntry? entryById(String id) {
     for (final entry in entries) {
       if (entry.id == id) return entry;
     }
     return null;
+  }
+
+  LedgerEntry? _entryById(String id) => entryById(id);
+
+  Map<String, int> unappliedPaymentTotals([Iterable<LedgerEntry>? source]) {
+    final totals = <String, int>{};
+    for (final entry in source ?? entries) {
+      if (entry.status != TxStatus.approved) continue;
+      if (entry.type == OperationType.payment) {
+        totals[entry.currency] =
+            (totals[entry.currency] ?? 0) + entry.amountMinor;
+      } else if (entry.type == OperationType.allocation) {
+        totals[entry.currency] =
+            (totals[entry.currency] ?? 0) - entry.amountMinor;
+      } else if (entry.type == OperationType.reversal) {
+        final original = entry.originalOperationId == null
+            ? null
+            : entryById(entry.originalOperationId!);
+        if (original?.type == OperationType.payment) {
+          totals[entry.currency] =
+              (totals[entry.currency] ?? 0) - effectAmountOf(entry);
+        } else if (original?.type == OperationType.allocation) {
+          totals[entry.currency] =
+              (totals[entry.currency] ?? 0) + effectAmountOf(entry);
+        }
+      }
+    }
+    totals.removeWhere((_, value) => value == 0);
+    return totals;
+  }
+
+  Map<String, int> grossApprovedEffectByCurrency([
+    Iterable<LedgerEntry>? source,
+  ]) {
+    final totals = <String, int>{};
+    for (final entry in source ?? entries) {
+      if (entry.status != TxStatus.approved) continue;
+      final effect = effectOf(entry);
+      if (effect == OperationEffect.neutral) continue;
+      totals[entry.currency] =
+          (totals[entry.currency] ?? 0) +
+          effect.apply(effectAmountOf(entry)).abs();
+    }
+    totals.removeWhere((_, value) => value == 0);
+    return totals;
   }
 
   List<PendingBreakdown> pendingBreakdown(Iterable<LedgerEntry> source) {
@@ -660,22 +705,18 @@ class AppState extends ChangeNotifier {
       ],
     );
     if (customer != null) {
-      final isIncrease =
-          entry.type == OperationType.charge ||
-          entry.type == OperationType.creditApplication;
       _replaceContact(
         customer,
         customer.copyWith(
           balancesMinor: _adjustCurrency(
             customer.balancesMinor,
             entry.currency,
-            isIncrease ? entry.amountMinor : -entry.amountMinor,
+            signedEffectOf(entry),
           ),
           pendingByCurrencyMinor: _adjustCurrency(
             customer.pendingByCurrencyMinor,
             entry.currency,
-            -entry.amountMinor,
-            clampZero: true,
+            -signedEffectOf(entry),
           ),
         ),
       );
@@ -706,8 +747,7 @@ class AppState extends ChangeNotifier {
           pendingByCurrencyMinor: _adjustCurrency(
             customer.pendingByCurrencyMinor,
             entry.currency,
-            -entry.amountMinor,
-            clampZero: true,
+            -signedEffectOf(entry),
           ),
         ),
       );
@@ -770,13 +810,12 @@ class AppState extends ChangeNotifier {
           balancesMinor: _adjustCurrency(
             customer.balancesMinor,
             entry.currency,
-            nextAmount,
+            effectOf(entry).apply(nextAmount),
           ),
           pendingByCurrencyMinor: _adjustCurrency(
             customer.pendingByCurrencyMinor,
             entry.currency,
-            -entry.amountMinor,
-            clampZero: true,
+            -signedEffectOf(entry),
           ),
         ),
       );
@@ -810,8 +849,7 @@ class AppState extends ChangeNotifier {
           pendingByCurrencyMinor: _adjustCurrency(
             customer.pendingByCurrencyMinor,
             entry.currency,
-            -entry.amountMinor,
-            clampZero: true,
+            -signedEffectOf(entry),
           ),
         ),
       );
@@ -850,16 +888,6 @@ class AppState extends ChangeNotifier {
       ],
     );
     entries.add(entry);
-    _replaceContact(
-      merchant,
-      merchant.copyWith(
-        pendingByCurrencyMinor: _adjustCurrency(
-          merchant.pendingByCurrencyMinor,
-          currency,
-          amountMinor,
-        ),
-      ),
-    );
     notifyListeners();
     if (isRemote && !offline) {
       _fireRemote(_submitPaymentRemote(entry, merchantContactId));
@@ -1076,21 +1104,30 @@ class AppState extends ChangeNotifier {
       final cycles = await api.accountCycles(relationship.relationshipId);
       final operations = await api.operations(relationship.relationshipId);
       final cycle = cycles.currentCycle;
+      final debtorSide =
+          relationship.myRole == 'customer' || relationship.myRole == 'buyer';
       final balances = <String, int>{};
       if (cycle != null) {
         for (final item in cycle.balances) {
           if (item.ownerUserId != remoteUser.id) continue;
-          balances[item.currency] =
-              (balances[item.currency] ?? 0) + item.partyBalanceMinor;
+          final signed = debtorSide
+              ? -item.partyBalanceMinor
+              : item.partyBalanceMinor;
+          balances[item.currency] = (balances[item.currency] ?? 0) + signed;
         }
       }
+      final operationsById = <String, RemoteOperation>{
+        for (final operation in operations) operation.operationId: operation,
+      };
       final pendingByCurrency = <String, int>{};
       for (final operation in operations) {
         if (operation.businessState != 'awaiting_counterparty') continue;
         final currency = _operationCurrency(operation);
         pendingByCurrency[currency] =
-            (pendingByCurrency[currency] ?? 0) + _operationAmount(operation);
+            (pendingByCurrency[currency] ?? 0) +
+            _remoteSignedEffect(operation, operationsById);
       }
+      pendingByCurrency.removeWhere((_, value) => value == 0);
 
       relationshipRoles[relationship.relationshipId] = relationship.myRole;
       relationshipOtherUserIds[relationship.relationshipId] = other.userId;
@@ -1319,8 +1356,7 @@ class AppState extends ChangeNotifier {
       photoCount: _intValue(operation.payload['photoCount']),
       history: history,
       serverVersion: operation.serverVersion,
-      originalOperationId:
-          operation.payload['originalOperationId']?.toString(),
+      originalOperationId: operation.payload['originalOperationId']?.toString(),
     );
   }
 
@@ -1343,6 +1379,23 @@ class AppState extends ChangeNotifier {
       'rejected' => TxStatus.rejected,
       _ => TxStatus.pending,
     };
+  }
+
+  int _remoteSignedEffect(
+    RemoteOperation operation,
+    Map<String, RemoteOperation> operationsById,
+  ) {
+    final type = _operationType(operation.operationType);
+    var effect = type.baseEffect;
+    var amount = _operationAmount(operation);
+    if (type == OperationType.reversal) {
+      final originalId = operation.payload['originalOperationId']?.toString();
+      final original = originalId == null ? null : operationsById[originalId];
+      if (original == null) return 0;
+      effect = _operationType(original.operationType).baseEffect.inverse;
+      if (amount <= 0) amount = _operationAmount(original);
+    }
+    return effect.apply(amount);
   }
 
   int _operationAmount(RemoteOperation operation) =>

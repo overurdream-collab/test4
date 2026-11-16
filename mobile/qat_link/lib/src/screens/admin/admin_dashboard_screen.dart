@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../design/components.dart';
 import '../../design/tokens.dart';
 import '../../format.dart';
+import '../../models.dart';
 import '../../state/app_state.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
@@ -245,32 +246,39 @@ class _OverviewSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final todayOperations = state.entries.where((entry) {
+      return entry.createdAt.year == now.year &&
+          entry.createdAt.month == now.month &&
+          entry.createdAt.day == now.day;
+    }).length;
+    final pendingOperations = state.entries
+        .where((entry) => entry.status == TxStatus.pending)
+        .length;
+    final movement = state.grossApprovedEffectByCurrency();
     final stats = [
       (
-        label: 'تجار نشطون',
-        value: '${state.contacts.length + 1240}',
-        delta: '+4.2%',
+        label: 'جهات مرتبطة',
+        value: '${state.contacts.length}',
+        delta: 'مباشر',
         icon: Icons.storefront_outlined,
       ),
       (
         label: 'عمليات اليوم',
-        value: '${state.entries.length + 3820}',
-        delta: '+8.1%',
+        value: '$todayOperations',
+        delta: 'مباشر',
         icon: Icons.receipt_long_outlined,
       ),
       (
-        label: 'قيمة الحركة',
-        value: formatCompactMoney(
-          state.entries.fold<int>(0, (sum, entry) => sum + entry.amountMinor) +
-              420000000,
-        ),
-        delta: '+6.4%',
+        label: 'قيمة الحركة المعتمدة',
+        value: formatMoneyTotals(movement, compact: true),
+        delta: 'حسب العملة',
         icon: Icons.trending_up_rounded,
       ),
       (
-        label: 'نزاعات مفتوحة',
-        value: '3',
-        delta: '-2',
+        label: 'عمليات معلقة',
+        value: '$pendingOperations',
+        delta: 'تحتاج مراجعة',
         icon: Icons.gavel_outlined,
       ),
     ];
