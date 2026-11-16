@@ -62,10 +62,12 @@ class _StatementScreenState extends State<StatementScreen> {
       return matchesContact && matchesPeriod && matchesStatus;
     }).toList();
 
-    final approved = _sum(
+    final approved = _effectTotals(
+      state,
       entries.where((entry) => entry.status == TxStatus.approved),
     );
-    final pending = _sum(
+    final pending = _effectTotals(
+      state,
       entries.where(
         (entry) =>
             entry.status == TxStatus.pending ||
@@ -73,7 +75,10 @@ class _StatementScreenState extends State<StatementScreen> {
             entry.status == TxStatus.local,
       ),
     );
-    final total = approved + pending;
+    final total = <String, int>{
+      for (final currency in {...approved.keys, ...pending.keys})
+        currency: (approved[currency] ?? 0) + (pending[currency] ?? 0),
+    };
 
     final groups = <String, List<LedgerEntry>>{};
     for (final entry in entries) {
@@ -97,7 +102,7 @@ class _StatementScreenState extends State<StatementScreen> {
             tooltip: 'تصدير',
             onPressed: entries.isEmpty
                 ? null
-                : () => _showExport(context, entries, selectedContact),
+                : () => _showExport(context, state, entries, selectedContact),
             icon: const Icon(Icons.ios_share_rounded),
           ),
           const SizedBox(width: QSpace.sm),
@@ -309,15 +314,17 @@ class _StatementScreenState extends State<StatementScreen> {
     };
   }
 
-  int _sum(Iterable<LedgerEntry> entries) {
-    return entries.fold<int>(0, (total, entry) {
-      final signed =
-          entry.type == OperationType.charge ||
-              entry.type == OperationType.creditApplication
-          ? entry.amountMinor
-          : -entry.amountMinor;
-      return total + signed;
-    });
+  Map<String, int> _effectTotals(
+    AppState state,
+    Iterable<LedgerEntry> entries,
+  ) {
+    final totals = <String, int>{};
+    for (final entry in entries) {
+      totals[entry.currency] =
+          (totals[entry.currency] ?? 0) + state.signedEffectOf(entry);
+    }
+    totals.removeWhere((_, value) => value == 0);
+    return totals;
   }
 
   String _counterparty(AppState state, LedgerEntry entry, bool merchantView) {
@@ -346,15 +353,20 @@ class _StatementScreenState extends State<StatementScreen> {
 
   Future<void> _showExport(
     BuildContext context,
+    AppState state,
     List<LedgerEntry> entries,
     Contact? contact,
   ) async {
     final pageContext = context;
-    final csv = StringBuffer()..writeln('التاريخ,النوع,الحالة,المبلغ,البيان');
+    final csv = StringBuffer()
+      ..writeln('التاريخ,النوع,الحالة,العملة,الأثر,المبلغ,البيان');
     for (final entry in entries) {
+      final effect = state.effectOf(entry);
+      final signed = effect.apply(state.effectAmountOf(entry));
       csv.writeln(
         '${formatDate(entry.createdAt)},${entry.type.label},${entry.status.label},'
-        '${(entry.amountMinor / 100).toStringAsFixed(2)},'
+        '${entry.currency},${effect.label},'
+        '${(signed / 100).toStringAsFixed(2)},'
         '${(entry.productName ?? entry.note ?? '').replaceAll(',', ' ')}',
       );
     }
@@ -425,9 +437,9 @@ class _SummaryCard extends StatelessWidget {
     required this.onClearContact,
   });
 
-  final int approved;
-  final int pending;
-  final int total;
+  final Map<String, int> approved;
+  final Map<String, int> pending;
+  final Map<String, int> total;
   final int count;
   final String periodLabel;
   final Contact? selectedContact;
@@ -474,7 +486,7 @@ class _SummaryCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(QRadius.pill),
                 ),
                 child: Text(
-                  'ر.ي',
+                  'متعدد العملات',
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
                     color: QColors.brightGreen,
                     fontWeight: FontWeight.w700,
@@ -489,7 +501,7 @@ class _SummaryCard extends StatelessWidget {
               Expanded(
                 child: QSummaryCircle(
                   label: 'الإجمالي',
-                  amountMinor: total.abs(),
+                  totals: total,
                   color: QColors.brightGreen,
                   size: 82,
                   hidden: state.hideAmounts,
@@ -498,7 +510,7 @@ class _SummaryCard extends StatelessWidget {
               Expanded(
                 child: QSummaryCircle(
                   label: 'المعتمد',
-                  amountMinor: approved.abs(),
+                  totals: approved,
                   color: QColors.approvedFg,
                   size: 82,
                   hidden: state.hideAmounts,
@@ -507,7 +519,7 @@ class _SummaryCard extends StatelessWidget {
               Expanded(
                 child: QSummaryCircle(
                   label: 'المعلق',
-                  amountMinor: pending.abs(),
+                  totals: pending,
                   color: QColors.pendingFg,
                   size: 82,
                   hidden: state.hideAmounts,

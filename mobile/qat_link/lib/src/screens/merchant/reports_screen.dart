@@ -4,6 +4,7 @@ import '../../design/components.dart';
 import '../../design/tokens.dart';
 import '../../format.dart';
 import '../../models.dart';
+import '../../state/app_state.dart';
 import '../shared/statement_screen.dart';
 
 class ReportsScreen extends StatefulWidget {
@@ -37,35 +38,32 @@ class _ReportsScreenState extends State<ReportsScreen> {
               entry.status != TxStatus.rejected,
         )
         .toList();
-    final charges = _sum(
-      entries.where(
-        (entry) =>
-            entry.type == OperationType.charge ||
-            entry.type == OperationType.creditApplication,
-      ),
-    );
-    final payments = _sum(
-      entries.where(
-        (entry) =>
-            entry.type == OperationType.payment ||
-            entry.type == OperationType.refund ||
-            entry.type == OperationType.salesReturn,
-      ),
-    );
-    final pending = _sum(
-      entries.where(
-        (entry) =>
-            entry.status == TxStatus.pending ||
-            entry.status == TxStatus.editRequested ||
-            entry.status == TxStatus.local,
-      ),
-    );
-    final approvedCount = entries
+    final approvedEntries = entries
         .where((entry) => entry.status == TxStatus.approved)
-        .length;
+        .toList();
+    final increases = _effectTotals(
+      state,
+      approvedEntries,
+      OperationEffect.increase,
+    );
+    final decreases = _effectTotals(
+      state,
+      approvedEntries,
+      OperationEffect.decrease,
+    );
+    final unappliedPayments = _typeTotals(
+      approvedEntries,
+      OperationType.payment,
+    );
+    final pending = _pendingTotals(state, entries);
+    final approvedCount = approvedEntries.length;
     final contacts = isMerchant ? state.customers : state.customerMerchants;
     final top = [...contacts]
-      ..sort((a, b) => b.balanceMinor.compareTo(a.balanceMinor));
+      ..sort(
+        (a, b) => b
+            .balanceFor(b.primaryCurrency)
+            .compareTo(a.balanceFor(a.primaryCurrency)),
+      );
     final topEntries = top.take(4).toList();
 
     return Scaffold(
@@ -106,8 +104,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   ),
                   const SizedBox(height: QSpace.md),
                   _SummaryHero(
-                    charges: charges,
-                    payments: payments,
+                    increases: increases,
+                    decreases: decreases,
                     pending: pending,
                     count: approvedCount,
                     hidden: state.hideAmounts,
@@ -118,8 +116,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
                     subtitle: 'حسب نوع العملية',
                   ),
                   _BreakdownCard(
-                    charges: charges,
-                    payments: payments,
+                    increases: increases,
+                    decreases: decreases,
+                    unappliedPayments: unappliedPayments,
                     pending: pending,
                     hidden: state.hideAmounts,
                   ),
@@ -163,36 +162,73 @@ class _ReportsScreenState extends State<ReportsScreen> {
     );
   }
 
-  int _sum(Iterable<LedgerEntry> entries) {
-    return entries.fold<int>(0, (total, entry) {
-      final signed =
-          entry.type == OperationType.charge ||
-              entry.type == OperationType.creditApplication
-          ? entry.amountMinor
-          : -entry.amountMinor;
-      return total + signed;
-    });
+  Map<String, int> _effectTotals(
+    AppState state,
+    Iterable<LedgerEntry> entries,
+    OperationEffect effect,
+  ) {
+    final totals = <String, int>{};
+    for (final entry in entries) {
+      if (state.effectOf(entry) != effect) continue;
+      totals[entry.currency] =
+          (totals[entry.currency] ?? 0) + state.effectAmountOf(entry);
+    }
+    return totals;
+  }
+
+  Map<String, int> _typeTotals(
+    Iterable<LedgerEntry> entries,
+    OperationType type,
+  ) {
+    final totals = <String, int>{};
+    for (final entry in entries) {
+      if (entry.type != type) continue;
+      totals[entry.currency] =
+          (totals[entry.currency] ?? 0) + entry.amountMinor;
+    }
+    return totals;
+  }
+
+  Map<String, int> _pendingTotals(
+    AppState state,
+    Iterable<LedgerEntry> entries,
+  ) {
+    final totals = <String, int>{};
+    for (final entry in entries) {
+      if (entry.status != TxStatus.pending &&
+          entry.status != TxStatus.editRequested &&
+          entry.status != TxStatus.local) {
+        continue;
+      }
+      totals[entry.currency] =
+          (totals[entry.currency] ?? 0) + state.signedEffectOf(entry);
+    }
+    totals.removeWhere((_, value) => value == 0);
+    return totals;
   }
 }
 
 class _SummaryHero extends StatelessWidget {
   const _SummaryHero({
-    required this.charges,
-    required this.payments,
+    required this.increases,
+    required this.decreases,
     required this.pending,
     required this.count,
     required this.hidden,
   });
 
-  final int charges;
-  final int payments;
-  final int pending;
+  final Map<String, int> increases;
+  final Map<String, int> decreases;
+  final Map<String, int> pending;
   final int count;
   final bool hidden;
 
   @override
   Widget build(BuildContext context) {
-    final net = charges - payments;
+    final net = <String, int>{
+      for (final currency in {...increases.keys, ...decreases.keys})
+        currency: (increases[currency] ?? 0) - (decreases[currency] ?? 0),
+    };
     return QCard(
       gradient: QColors.gradient,
       borderColor: Colors.transparent,
@@ -221,7 +257,9 @@ class _SummaryHero extends StatelessWidget {
           ),
           const SizedBox(height: QSpace.md),
           Text(
-            formatMoney(net.abs(), hidden: hidden),
+            formatMoneyTotals(net, hidden: hidden),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.headlineMedium?.copyWith(
               color: QColors.pureWhite,
               fontWeight: FontWeight.w900,
@@ -232,20 +270,32 @@ class _SummaryHero extends StatelessWidget {
             children: [
               Expanded(
                 child: _HeroMetric(
-                  label: 'ديون جديدة',
-                  value: formatCompactMoney(charges),
+                  label: 'زيادة الدين',
+                  value: formatMoneyTotals(
+                    increases,
+                    hidden: hidden,
+                    compact: true,
+                  ),
                 ),
               ),
               Expanded(
                 child: _HeroMetric(
-                  label: 'تحصيلات',
-                  value: formatCompactMoney(payments),
+                  label: 'تخفيض الدين',
+                  value: formatMoneyTotals(
+                    decreases,
+                    hidden: hidden,
+                    compact: true,
+                  ),
                 ),
               ),
               Expanded(
                 child: _HeroMetric(
                   label: 'معلق',
-                  value: formatCompactMoney(pending.abs()),
+                  value: formatMoneyTotals(
+                    pending,
+                    hidden: hidden,
+                    compact: true,
+                  ),
                 ),
               ),
             ],
@@ -287,7 +337,7 @@ class _HeroMetric extends StatelessWidget {
           ),
           Text(
             value,
-            maxLines: 1,
+            maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.labelLarge?.copyWith(
               color: QColors.pureWhite,
@@ -302,15 +352,17 @@ class _HeroMetric extends StatelessWidget {
 
 class _BreakdownCard extends StatelessWidget {
   const _BreakdownCard({
-    required this.charges,
-    required this.payments,
+    required this.increases,
+    required this.decreases,
+    required this.unappliedPayments,
     required this.pending,
     required this.hidden,
   });
 
-  final int charges;
-  final int payments;
-  final int pending;
+  final Map<String, int> increases;
+  final Map<String, int> decreases;
+  final Map<String, int> unappliedPayments;
+  final Map<String, int> pending;
   final bool hidden;
 
   @override
@@ -319,22 +371,29 @@ class _BreakdownCard extends StatelessWidget {
       child: Column(
         children: [
           _BreakdownRow(
-            label: 'ديون جديدة',
-            value: charges,
+            label: 'زيادة الدين (دين جديد/إرجاع)',
+            value: increases,
             color: QColors.brightGreen,
             hidden: hidden,
           ),
           const Divider(height: QSpace.xl),
           _BreakdownRow(
-            label: 'تحصيلات ومدفوعات',
-            value: payments,
+            label: 'تخفيض الدين (إرجاع مبيعات/تخصيص)',
+            value: decreases,
             color: QColors.approvedFg,
             hidden: hidden,
           ),
           const Divider(height: QSpace.xl),
           _BreakdownRow(
-            label: 'مبالغ معلقة',
-            value: pending.abs(),
+            label: 'دفعات غير مخصصة',
+            value: unappliedPayments,
+            color: QColors.brightGreen,
+            hidden: hidden,
+          ),
+          const Divider(height: QSpace.xl),
+          _BreakdownRow(
+            label: 'صافي المبالغ المعلقة',
+            value: pending,
             color: QColors.pendingFg,
             hidden: hidden,
           ),
@@ -353,7 +412,7 @@ class _BreakdownRow extends StatelessWidget {
   });
 
   final String label;
-  final int value;
+  final Map<String, int> value;
   final Color color;
   final bool hidden;
 
@@ -371,7 +430,10 @@ class _BreakdownRow extends StatelessWidget {
           child: Text(label, style: Theme.of(context).textTheme.bodyMedium),
         ),
         Text(
-          formatMoney(value, hidden: hidden),
+          formatMoneyTotals(value, hidden: hidden, compact: true),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.end,
           style: Theme.of(context).textTheme.titleSmall?.copyWith(
             color: color,
             fontWeight: FontWeight.w700,
