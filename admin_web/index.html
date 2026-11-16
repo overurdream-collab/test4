@@ -64,6 +64,7 @@
       </div>
       <nav>
         <a class="nav-item active" href="#service-controls">مفاتيح الخدمة</a>
+        <a class="nav-item" href="#admin-ads">إعلانات الرئيسية</a>
       </nav>
       <div class="sidebar-foot">
         <div id="admin-identity" class="identity"></div>
@@ -112,6 +113,29 @@
             <span class="sr-only">تبديل مرتجعات البيع</span>
           </label>
         </div>
+      </article>
+
+      <article id="admin-ads" class="panel" aria-labelledby="ads-title">
+        <div class="panel-head">
+          <div>
+            <h2 id="ads-title">إعلانات الرئيسية</h2>
+            <p>حتى 5 صور تظهر في شريط إعلاني أعلى الصفحة الرئيسية للتطبيق. الأنواع المدعومة: PNG أو JPG أو WEBP وبحجم أقصى 2MB.</p>
+          </div>
+          <span id="ads-count" class="pill muted">0 / 5</span>
+        </div>
+        <form id="ad-form" class="form ads-form">
+          <div>
+            <label for="ad-image">صورة الإعلان</label>
+            <input id="ad-image" type="file" accept="image/png,image/jpeg,image/webp" required>
+          </div>
+          <div>
+            <label for="ad-title">العنوان (اختياري)</label>
+            <input id="ad-title" type="text" maxlength="120" placeholder="عنوان قصير يظهر فوق الصورة">
+          </div>
+          <button id="upload-ad" class="primary" type="submit">رفع الإعلان</button>
+        </form>
+        <p id="ads-message" class="message" role="status" aria-live="polite"></p>
+        <div id="ads-list" class="ads-list"></div>
       </article>
 
       <article class="panel scope-panel">

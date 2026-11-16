@@ -33,6 +33,30 @@ void main() {
     expect(find.text('أضف عميلاً وادعُه للتطبيق'), findsOneWidget);
   });
 
+  testWidgets('center add button opens the quick add menu', (tester) async {
+    final state = AppState();
+    await pumpApp(tester, state);
+
+    await tester.tap(find.byIcon(Icons.add_rounded));
+    await tester.pumpAndSettle();
+
+    expect(find.text('اختيار نوع الإضافة'), findsOneWidget);
+    expect(find.text('تسجيل دين جديد'), findsOneWidget);
+    expect(find.text('إضافة عميل جديد'), findsOneWidget);
+  });
+
+  testWidgets('center label opens the store screen', (tester) async {
+    final state = AppState();
+    await pumpApp(tester, state);
+
+    await tester.tap(find.text('متجري'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('متجري'), findsWidgets);
+    expect(find.text('نشاط أخير'), findsOneWidget);
+    expect(find.text('الموظفون'), findsOneWidget);
+  });
+
   testWidgets('switching to the customer persona shows customer home', (
     tester,
   ) async {
@@ -42,7 +66,8 @@ void main() {
     state.setPersona(AppPersona.customer);
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('مساء الخير، أحمد'), findsOneWidget);
+    expect(find.text('أحمد الصبري'), findsWidgets);
+    expect(find.text('770 123 456'), findsOneWidget);
     expect(find.text('إجمالي المستحق'), findsOneWidget);
     expect(find.text('طلب سداد'), findsWidgets);
   });
@@ -58,6 +83,12 @@ void main() {
 
     expect(find.text('الباقة الحالية'), findsOneWidget);
     expect(find.text('الأجهزة والجلسات'), findsOneWidget);
+    expect(find.text('مفاهيم الشعار'), findsNothing);
+
+    state.isAdmin = true;
+    state.notifyListeners();
+    await tester.pumpAndSettle();
+
     expect(find.text('مفاهيم الشعار'), findsOneWidget);
     expect(find.text('معاينة لوحة الإدارة'), findsOneWidget);
   });

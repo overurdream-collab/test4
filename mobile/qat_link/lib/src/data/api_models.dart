@@ -85,6 +85,8 @@ class RemoteUser {
     required this.deviceId,
     this.displayName,
     this.locale = 'ar',
+    this.accountType,
+    this.isAdmin = false,
   });
 
   final String id;
@@ -92,6 +94,22 @@ class RemoteUser {
   final String deviceId;
   final String? displayName;
   final String locale;
+  final String? accountType;
+  final bool isAdmin;
+}
+
+class RemoteAd {
+  const RemoteAd({
+    required this.id,
+    required this.imageUrl,
+    this.title,
+    this.sortOrder = 0,
+  });
+
+  final String id;
+  final String imageUrl;
+  final String? title;
+  final int sortOrder;
 }
 
 class RemoteParty {

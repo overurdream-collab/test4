@@ -28,19 +28,88 @@ void main() {
     expect(state.user.name, 'أحمد الصبري');
     expect(state.contacts, hasLength(1));
     expect(state.contacts.single.name, 'أبو أحمد');
+    expect(state.contacts.single.balanceFor('YER'), 1200000);
+    expect(state.contacts.single.balanceFor('SAR'), 300000);
+    expect(state.contacts.single.pendingFor('YER'), 1200000);
+    expect(state.contacts.single.pendingFor('SAR'), 50000);
     expect(state.contacts.single.balanceMinor, 1200000);
     expect(state.contacts.single.pendingMinor, 1200000);
-    expect(state.entries, hasLength(1));
-    expect(state.merchantEntries, hasLength(1));
+    expect(state.entries, hasLength(2));
+    expect(state.merchantEntries, hasLength(2));
 
-    final entry = state.entries.single;
+    final entry = state.entries.firstWhere((item) => item.id == 'op-1');
     expect(entry.id, 'op-1');
     expect(entry.type, OperationType.charge);
+    expect(entry.currency, 'YER');
     expect(entry.status, TxStatus.pending);
     expect(entry.createdByMe, isTrue);
     expect(entry.serverVersion, 1);
     expect(state.persona, AppPersona.merchant);
     expect(state.sessions.single.current, isTrue);
+  });
+
+  test('remote customer balances are normalized to debt-positive', () async {
+    final api = QatLinkApi(
+      baseUri: Uri.parse('https://api.qatlink.test'),
+      client: MockClient((request) async {
+        final path = request.url.path;
+        if (path == '/v1/relationships') {
+          return _json({
+            'relationships': [
+              {
+                'relationshipId': 'rel-1',
+                'relationshipType': 'merchant_customer',
+                'status': 'active',
+                'currentCycleId': 'cycle-1',
+                'myRole': 'customer',
+                'otherParty': {
+                  'userId': 'user-2',
+                  'role': 'merchant',
+                  'displayName': 'مؤسسة النخبة للقات',
+                  'phoneE164': '+967700000002',
+                },
+              },
+            ],
+          });
+        }
+        if (path == '/v1/relationships/rel-1/account-cycles') {
+          return _json({
+            'currentCycleId': 'cycle-1',
+            'cycles': [
+              {
+                'cycleId': 'cycle-1',
+                'cycleNumber': 1,
+                'title': 'الدورة الحالية',
+                'status': 'active',
+                'balances': [
+                  {
+                    'ownerUserId': 'user-1',
+                    'currency': 'YER',
+                    'receivableMinor': '0',
+                    'payableMinor': '1200000',
+                    'partyBalanceMinor': '-1200000',
+                    'unappliedPaymentAssetMinor': '0',
+                    'unappliedPaymentLiabilityMinor': '0',
+                  },
+                ],
+              },
+            ],
+          });
+        }
+        return _handler(request);
+      }),
+    );
+    final state = AppState(
+      seed: false,
+      api: api,
+      sessionStore: MemoryQatLinkSessionStore(deviceId: 'device-1'),
+    );
+
+    await state.verifyOtp(phone: '+967 700 000 001', code: '123456');
+
+    expect(state.contacts.single.kind, ContactKind.merchant);
+    expect(state.contacts.single.balanceFor('YER'), 1200000);
+    expect(state.contacts.single.balanceMinor, 1200000);
   });
 
   test('bootstrap restores a stored session before loading data', () async {
@@ -79,11 +148,8 @@ void main() {
       baseUri: Uri.parse('https://api.qatlink.test'),
       client: MockClient(_handler),
     );
-    final state = AppState(
-      seed: false,
-      api: api,
-      sessionStore: MemoryQatLinkSessionStore(deviceId: 'device-1'),
-    );
+    final store = MemoryQatLinkSessionStore(deviceId: 'device-1');
+    final state = AppState(seed: false, api: api, sessionStore: store);
 
     await state.verifyOtp(phone: '+967 700 000 001', code: '123456');
     expect(state.contacts, isNotEmpty);
@@ -91,14 +157,114 @@ void main() {
 
     await state.logout();
 
+    expect(await store.deviceId(), isNot('device-1'));
     expect(state.loggedIn, isFalse);
     expect(state.contacts, isEmpty);
     expect(state.entries, isEmpty);
     expect(state.sessions, isEmpty);
     expect(state.activeRelationshipId, isNull);
     expect(state.persona, AppPersona.merchant);
+
     expect(api.session, isNull);
   });
+
+  test('remote approvals wait for the server and edits are blocked', () async {
+    var decided = false;
+    final api = QatLinkApi(
+      baseUri: Uri.parse('https://api.qatlink.test'),
+      client: MockClient((request) async {
+        final path = request.url.path;
+        if (path == '/v1/relationships/rel-1/operations/op-1/decision') {
+          decided = true;
+          return _json({'status': 'approved'});
+        }
+        if (path == '/v1/relationships/rel-1/operations') {
+          return _json(_operationsBody(approved: decided));
+        }
+        return _handler(request);
+      }),
+    );
+    final state = AppState(
+      seed: false,
+      api: api,
+      sessionStore: MemoryQatLinkSessionStore(deviceId: 'device-1'),
+    );
+
+    await state.verifyOtp(phone: '+967 700 000 001', code: '123456');
+    final before = state.contacts.single.balanceFor('YER');
+    final pendingBefore = state.contacts.single.pendingFor('YER');
+
+    final approval = state.approveEntry('op-1');
+    expect(
+      state.entries.firstWhere((entry) => entry.id == 'op-1').status,
+      TxStatus.pending,
+    );
+    expect(state.contacts.single.balanceFor('YER'), before);
+    expect(state.contacts.single.pendingFor('YER'), pendingBefore);
+
+    await approval;
+    expect(decided, isTrue);
+    expect(
+      state.entries.firstWhere((entry) => entry.id == 'op-1').status,
+      TxStatus.approved,
+    );
+    expect(state.contacts.single.balanceFor('YER'), 1200000);
+    expect(state.contacts.single.pendingFor('YER'), 0);
+
+    final editSent = await state.requestEdit('op-2', 100, 'طلب تعديل');
+    expect(editSent, isFalse);
+    expect(
+      state.entries.firstWhere((entry) => entry.id == 'op-2').status,
+      TxStatus.pending,
+    );
+  });
+}
+
+Map<String, Object?> _operationsBody({required bool approved}) {
+  return {
+    'operations': [
+      {
+        'operationId': 'op-1',
+        'actorUserId': 'user-1',
+        'operationType': 'credit_charge',
+        'businessState': approved ? 'approved' : 'awaiting_counterparty',
+        'baseVersion': 0,
+        'serverVersion': 1,
+        'serverSequence': 1,
+        'payload': {
+          'creditorUserId': 'user-1',
+          'debtorUserId': 'user-2',
+          'currency': 'YER',
+          'amountMinor': '1200000',
+          'productName': 'قات رطب',
+        },
+        'clientCreatedAt': '2026-11-05T10:00:00Z',
+        'serverCreatedAt': '2026-11-05T10:00:01Z',
+        'decision': approved ? 'approved' : null,
+      },
+      {
+        'operationId': 'op-2',
+        'actorUserId': 'user-1',
+        'operationType': 'credit_charge',
+        'businessState': 'awaiting_counterparty',
+        'baseVersion': 0,
+        'serverVersion': 1,
+        'serverSequence': 2,
+        'payload': {
+          'creditorUserId': 'user-1',
+          'debtorUserId': 'user-2',
+          'currency': 'SAR',
+          'amountMinor': '50000',
+          'productName': 'توصيل',
+        },
+        'clientCreatedAt': '2026-11-05T10:00:02Z',
+        'serverCreatedAt': '2026-11-05T10:00:03Z',
+        'decision': null,
+      },
+    ],
+    'nextCursor': 2,
+    'hasMore': false,
+  };
 }
 
 Future<http.Response> _handler(http.Request request) async {
@@ -182,36 +348,21 @@ Future<http.Response> _handler(http.Request request) async {
                 'unappliedPaymentAssetMinor': '0',
                 'unappliedPaymentLiabilityMinor': '0',
               },
+              {
+                'ownerUserId': 'user-1',
+                'currency': 'SAR',
+                'receivableMinor': '300000',
+                'payableMinor': '0',
+                'partyBalanceMinor': '300000',
+                'unappliedPaymentAssetMinor': '0',
+                'unappliedPaymentLiabilityMinor': '0',
+              },
             ],
           },
         ],
       });
     case '/v1/relationships/rel-1/operations':
-      return _json({
-        'operations': [
-          {
-            'operationId': 'op-1',
-            'actorUserId': 'user-1',
-            'operationType': 'credit_charge',
-            'businessState': 'awaiting_counterparty',
-            'baseVersion': 0,
-            'serverVersion': 1,
-            'serverSequence': 1,
-            'payload': {
-              'creditorUserId': 'user-1',
-              'debtorUserId': 'user-2',
-              'currency': 'YER',
-              'amountMinor': '1200000',
-              'productName': 'قات رطب',
-            },
-            'clientCreatedAt': '2026-11-05T10:00:00Z',
-            'serverCreatedAt': '2026-11-05T10:00:01Z',
-            'decision': null,
-          },
-        ],
-        'nextCursor': 1,
-        'hasMore': false,
-      });
+      return _json(_operationsBody(approved: false));
     case '/v1/relationships/rel-1/settlement-reset-requests/pending':
       return _json({'request': null});
     default:

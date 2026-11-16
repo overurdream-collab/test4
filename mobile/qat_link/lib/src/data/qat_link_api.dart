@@ -153,6 +153,7 @@ class QatLinkApi {
     required String deviceId,
     required String deviceLabel,
     required String platform,
+    String? accountType,
   }) async {
     final response = await _request(
       method: 'POST',
@@ -163,6 +164,7 @@ class QatLinkApi {
         'deviceId': deviceId,
         'deviceLabel': deviceLabel,
         'platform': platform,
+        'accountType': ?accountType,
       },
       authenticated: false,
     );
@@ -190,6 +192,8 @@ class QatLinkApi {
       deviceId: response['deviceId']! as String,
       displayName: user['displayName'] as String?,
       locale: user['locale'] as String? ?? 'ar',
+      accountType: user['accountType'] as String?,
+      isAdmin: user['isAdmin'] == true,
     );
   }
 
@@ -441,6 +445,25 @@ class QatLinkApi {
       extraHeaders: {'idempotency-key': idempotencyKey},
       body: {'decision': decision, 'reason': ?reason},
     );
+  }
+
+  Future<List<RemoteAd>> ads() async {
+    final response = await _request(method: 'GET', segments: ['v1', 'ads']);
+    return _list(response['ads']).map((raw) {
+      final item = _map(raw);
+      final image = item['imageUrl'] as String? ?? '';
+      final resolved = image.isEmpty
+          ? ''
+          : image.startsWith('http')
+          ? image
+          : baseUri.resolve(image).toString();
+      return RemoteAd(
+        id: item['id']! as String,
+        imageUrl: resolved,
+        title: item['title'] as String?,
+        sortOrder: _int(item['sortOrder']),
+      );
+    }).toList();
   }
 
   Future<List<RemoteDevice>> devices() async {

@@ -7,6 +7,7 @@ import 'api_models.dart';
 
 const _sessionKey = 'qat_link_auth_session_v1';
 const _deviceIdKey = 'qat_link_device_id_v1';
+const _accountTypeKey = 'qat_link_account_type_v1';
 
 abstract interface class QatLinkSessionStore {
   Future<AuthSession?> read();
@@ -16,6 +17,12 @@ abstract interface class QatLinkSessionStore {
   Future<void> clear();
 
   Future<String> deviceId();
+
+  Future<void> rotateDeviceId();
+
+  Future<String?> readAccountType();
+
+  Future<void> writeAccountType(String accountType);
 }
 
 class SecureQatLinkSessionStore implements QatLinkSessionStore {
@@ -56,15 +63,31 @@ class SecureQatLinkSessionStore implements QatLinkSessionStore {
     await _storage.write(key: _deviceIdKey, value: created);
     return created;
   }
+
+  @override
+  Future<void> rotateDeviceId() =>
+      _storage.write(key: _deviceIdKey, value: generateUuidV4());
+
+  @override
+  Future<String?> readAccountType() => _storage.read(key: _accountTypeKey);
+
+  @override
+  Future<void> writeAccountType(String accountType) =>
+      _storage.write(key: _accountTypeKey, value: accountType);
 }
 
 class MemoryQatLinkSessionStore implements QatLinkSessionStore {
-  MemoryQatLinkSessionStore({AuthSession? session, String? deviceId})
-    : _session = session,
-      _deviceId = deviceId ?? generateUuidV4();
+  MemoryQatLinkSessionStore({
+    AuthSession? session,
+    String? deviceId,
+    String? accountType,
+  }) : _session = session,
+       _deviceId = deviceId ?? generateUuidV4(),
+       _accountType = accountType;
 
   AuthSession? _session;
-  final String _deviceId;
+  String _deviceId;
+  String? _accountType;
 
   @override
   Future<AuthSession?> read() async => _session;
@@ -77,6 +100,16 @@ class MemoryQatLinkSessionStore implements QatLinkSessionStore {
 
   @override
   Future<String> deviceId() async => _deviceId;
+
+  @override
+  Future<void> rotateDeviceId() async => _deviceId = generateUuidV4();
+
+  @override
+  Future<String?> readAccountType() async => _accountType;
+
+  @override
+  Future<void> writeAccountType(String accountType) async =>
+      _accountType = accountType;
 }
 
 String generateUuidV4() {

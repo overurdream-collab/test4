@@ -18,7 +18,9 @@ class CustomerMerchantsScreen extends StatefulWidget {
 
 class _CustomerMerchantsScreenState extends State<CustomerMerchantsScreen> {
   final _searchController = TextEditingController();
-  int _filter = 0;
+  String? _merchantId;
+  DateTime? _date;
+  int _status = 0;
 
   @override
   void dispose() {
@@ -30,17 +32,48 @@ class _CustomerMerchantsScreenState extends State<CustomerMerchantsScreen> {
   Widget build(BuildContext context) {
     final state = QScope.of(context);
     final query = _searchController.text.trim();
-    final merchants = state.customerMerchants.where((merchant) {
+    final allMerchants = state.customerMerchants;
+    final merchants = allMerchants.where((merchant) {
       final matchesQuery =
           query.isEmpty ||
           merchant.displayName.contains(query) ||
           merchant.category.contains(query);
-      final matchesFilter = switch (_filter) {
-        1 => merchant.balanceMinor > 0,
-        2 => merchant.pendingMinor > 0,
+      final matchesMerchant = _merchantId == null || merchant.id == _merchantId;
+      return matchesQuery && matchesMerchant;
+    }).toList();
+    final selectedMerchant = _merchantId == null
+        ? null
+        : state.contactById(_merchantId!);
+    final allEntries = state.customerEntries.where((entry) {
+      final matchesMerchant =
+          _merchantId == null || entry.merchantId == _merchantId;
+      final matchesDate =
+          _date == null ||
+          (entry.createdAt.year == _date!.year &&
+              entry.createdAt.month == _date!.month &&
+              entry.createdAt.day == _date!.day);
+      return matchesMerchant && matchesDate;
+    }).toList();
+    final summaryEntries = allEntries.where((entry) {
+      return entry.status != TxStatus.rejected;
+    }).toList();
+    final approved = _netByCurrency(state, summaryEntries, TxStatus.approved);
+    final pending = _pendingByCurrency(state, summaryEntries);
+    final total = <String, int>{
+      for (final currency in {...approved.keys, ...pending.keys})
+        currency:
+            (approved[currency] ?? 0).abs() + (pending[currency] ?? 0).abs(),
+    };
+    final entries = allEntries.where((entry) {
+      return switch (_status) {
+        1 => entry.status == TxStatus.approved,
+        2 =>
+          entry.status == TxStatus.pending ||
+              entry.status == TxStatus.editRequested ||
+              entry.status == TxStatus.local,
+        3 => entry.status == TxStatus.rejected,
         _ => true,
       };
-      return matchesQuery && matchesFilter;
     }).toList();
 
     return Scaffold(
@@ -48,7 +81,7 @@ class _CustomerMerchantsScreenState extends State<CustomerMerchantsScreen> {
         title: const Text('التجار'),
         actions: [
           IconButton(
-            tooltip: 'كشف الحساب',
+            tooltip: 'الحركة',
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute<void>(builder: (_) => const StatementScreen()),
             ),
@@ -74,6 +107,61 @@ class _CustomerMerchantsScreenState extends State<CustomerMerchantsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  _TotalsBox(
+                    total: total,
+                    approved: approved,
+                    pending: pending,
+                    hidden: state.hideAmounts,
+                  ),
+                  const SizedBox(height: QSpace.md),
+                  DropdownButtonFormField<String?>(
+                    initialValue: _merchantId,
+                    decoration: const InputDecoration(
+                      labelText: 'التاجر',
+                      prefixIcon: Icon(Icons.storefront_outlined),
+                    ),
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('كل التجار'),
+                      ),
+                      for (final merchant in allMerchants)
+                        DropdownMenuItem<String?>(
+                          value: merchant.id,
+                          child: Text(merchant.displayName),
+                        ),
+                    ],
+                    onChanged: (value) => setState(() => _merchantId = value),
+                  ),
+                  const SizedBox(height: QSpace.sm),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => _pickDate(context),
+                          icon: const Icon(Icons.calendar_month_outlined),
+                          label: Text(
+                            _date == null ? 'كل التواريخ' : formatDate(_date!),
+                          ),
+                        ),
+                      ),
+                      if (_date != null) ...[
+                        const SizedBox(width: QSpace.sm),
+                        IconButton(
+                          tooltip: 'مسح التاريخ',
+                          onPressed: () => setState(() => _date = null),
+                          icon: const Icon(Icons.close_rounded),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: QSpace.md),
+                  QFilterPills(
+                    items: const ['كل الحالات', 'معتمد', 'معلق', 'مرفوض'],
+                    selected: _status,
+                    onSelected: (value) => setState(() => _status = value),
+                  ),
+                  const SizedBox(height: QSpace.md),
                   TextField(
                     controller: _searchController,
                     onChanged: (_) => setState(() {}),
@@ -81,12 +169,6 @@ class _CustomerMerchantsScreenState extends State<CustomerMerchantsScreen> {
                       hintText: 'ابحث عن تاجر أو نشاط',
                       prefixIcon: Icon(Icons.search_rounded),
                     ),
-                  ),
-                  const SizedBox(height: QSpace.md),
-                  QFilterPills(
-                    items: const ['الكل', 'عليهم رصيد', 'لديهم عمليات معلقة'],
-                    selected: _filter,
-                    onSelected: (value) => setState(() => _filter = value),
                   ),
                   const SizedBox(height: QSpace.md),
                   if (merchants.isEmpty)
@@ -107,6 +189,41 @@ class _CustomerMerchantsScreenState extends State<CustomerMerchantsScreen> {
                       ),
                       const SizedBox(height: QSpace.md),
                     ],
+                  if (selectedMerchant != null) ...[
+                    const SizedBox(height: QSpace.sm),
+                    QSectionHeader(
+                      title: 'حركات ${selectedMerchant.displayName}',
+                      subtitle: _date == null
+                          ? 'كل التواريخ'
+                          : formatDate(_date!),
+                    ),
+                    QCard(
+                      padding: EdgeInsets.zero,
+                      child: entries.isEmpty
+                          ? const QStateView(
+                              state: QDataState.empty,
+                              compact: true,
+                            )
+                          : Column(
+                              children: [
+                                for (
+                                  var index = 0;
+                                  index < entries.length;
+                                  index++
+                                ) ...[
+                                  QEntryTile(
+                                    entry: entries[index],
+                                    title: entries[index].productName ??
+                                        entries[index].type.label,
+                                  ),
+                                  if (index != entries.length - 1)
+                                    const Divider(),
+                                ],
+                              ],
+                            ),
+                    ),
+                    const SizedBox(height: QSpace.md),
+                  ],
                   const SizedBox(height: QSpace.sm),
                   QCard(
                     child: Row(
@@ -134,6 +251,50 @@ class _CustomerMerchantsScreenState extends State<CustomerMerchantsScreen> {
     );
   }
 
+  Map<String, int> _pendingByCurrency(
+    AppState state,
+    List<LedgerEntry> entries,
+  ) {
+    final totals = <String, int>{};
+    for (final entry in entries) {
+      if (entry.status != TxStatus.pending &&
+          entry.status != TxStatus.editRequested &&
+          entry.status != TxStatus.local) {
+        continue;
+      }
+      totals[entry.currency] =
+          (totals[entry.currency] ?? 0) + state.signedEffectOf(entry);
+    }
+    totals.removeWhere((_, value) => value == 0);
+    return totals;
+  }
+
+  Map<String, int> _netByCurrency(
+    AppState state,
+    List<LedgerEntry> entries,
+    TxStatus status,
+  ) {
+    final totals = <String, int>{};
+    for (final entry in entries) {
+      if (entry.status != status) continue;
+      totals[entry.currency] =
+          (totals[entry.currency] ?? 0) + state.signedEffectOf(entry);
+    }
+    totals.removeWhere((_, value) => value == 0);
+    return totals;
+  }
+
+  Future<void> _pickDate(BuildContext context) async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _date ?? now,
+      firstDate: DateTime(now.year - 3),
+      lastDate: DateTime(now.year + 1),
+    );
+    if (picked != null) setState(() => _date = picked);
+  }
+
   void _settle(BuildContext context, AppState state, Contact merchant) {
     if (state.hasSettlementToday(merchant.id)) {
       QToast.show(context, 'لديك طلب سداد اليوم بالفعل');
@@ -141,6 +302,123 @@ class _CustomerMerchantsScreenState extends State<CustomerMerchantsScreen> {
     }
     state.requestSettlement(merchant.id);
     QToast.show(context, 'تم إرسال طلب السداد إلى ${merchant.displayName}');
+  }
+}
+
+class _TotalsBox extends StatelessWidget {
+  const _TotalsBox({
+    required this.total,
+    required this.approved,
+    required this.pending,
+    required this.hidden,
+  });
+
+  final Map<String, int> total;
+  final Map<String, int> approved;
+  final Map<String, int> pending;
+  final bool hidden;
+
+  @override
+  Widget build(BuildContext context) {
+    return QCard(
+      gradient: const LinearGradient(
+        begin: Alignment.topRight,
+        end: Alignment.bottomLeft,
+        colors: [QColors.softMint, QColors.pureWhite],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'إجمالي المبالغ',
+            style: Theme.of(context).textTheme.titleSmall,
+          ),
+          const SizedBox(height: QSpace.md),
+          Row(
+            children: [
+              Expanded(
+                child: _SummaryCircle(
+                  label: 'الإجمالي',
+                  totals: total,
+                  color: QColors.brightGreen,
+                  hidden: hidden,
+                ),
+              ),
+              Expanded(
+                child: _SummaryCircle(
+                  label: 'المعتمد',
+                  totals: approved,
+                  color: QColors.rejectedFg,
+                  hidden: hidden,
+                ),
+              ),
+              Expanded(
+                child: _SummaryCircle(
+                  label: 'المعلق',
+                  totals: pending,
+                  color: QColors.pendingFg,
+                  hidden: hidden,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryCircle extends StatelessWidget {
+  const _SummaryCircle({
+    required this.label,
+    required this.totals,
+    required this.color,
+    required this.hidden,
+  });
+
+  final String label;
+  final Map<String, int> totals;
+  final Color color;
+  final bool hidden;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Container(
+          width: 92,
+          height: 92,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: color.withValues(alpha: 0.10),
+            border: Border.all(color: color.withValues(alpha: 0.55), width: 2),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(QSpace.xs),
+            child: Text(
+              hidden
+                  ? '••••'
+                  : formatMoneyTotals(totals, compact: true),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                color: color,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: QSpace.xs),
+        Text(
+          label,
+          style: Theme.of(
+            context,
+          ).textTheme.labelSmall?.copyWith(color: color),
+        ),
+      ],
+    );
   }
 }
 
@@ -158,8 +436,16 @@ class _MerchantCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = QScope.of(context);
-    final limit = merchant.creditLimitMinor;
-    final used = merchant.balanceMinor + merchant.pendingMinor;
+    final limits = merchant.creditLimitsMinor;
+    final used = {
+      for (final currency in limits.keys)
+        currency:
+            merchant.balanceFor(currency) + merchant.pendingFor(currency),
+    };
+    final available = {
+      for (final entry in limits.entries)
+        entry.key: merchant.availableFor(entry.key),
+    };
     return QCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -211,7 +497,7 @@ class _MerchantCard extends StatelessWidget {
               Expanded(
                 child: _Amount(
                   label: 'المعتمد',
-                  amount: merchant.balanceMinor,
+                  totals: merchant.balancesMinor,
                   color: QColors.approvedFg,
                   hidden: state.hideAmounts,
                 ),
@@ -219,7 +505,7 @@ class _MerchantCard extends StatelessWidget {
               Expanded(
                 child: _Amount(
                   label: 'المعلق',
-                  amount: merchant.pendingMinor,
+                  totals: merchant.pendingByCurrencyMinor,
                   color: QColors.pendingFg,
                   hidden: state.hideAmounts,
                 ),
@@ -227,7 +513,7 @@ class _MerchantCard extends StatelessWidget {
               Expanded(
                 child: _Amount(
                   label: 'المتاح',
-                  amount: (limit - used).clamp(0, limit),
+                  totals: available,
                   color: QColors.brightGreen,
                   hidden: state.hideAmounts,
                 ),
@@ -235,9 +521,9 @@ class _MerchantCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: QSpace.md),
-          QCreditLimitBar(
+          QCreditLimitBars(
+            limitsMinor: limits,
             usedMinor: used,
-            limitMinor: limit,
             hidden: state.hideAmounts,
           ),
           const SizedBox(height: QSpace.md),
@@ -269,13 +555,13 @@ class _MerchantCard extends StatelessWidget {
 class _Amount extends StatelessWidget {
   const _Amount({
     required this.label,
-    required this.amount,
+    required this.totals,
     required this.color,
     required this.hidden,
   });
 
   final String label;
-  final int amount;
+  final Map<String, int> totals;
   final Color color;
   final bool hidden;
 
@@ -287,7 +573,9 @@ class _Amount extends StatelessWidget {
         Text(label, style: Theme.of(context).textTheme.labelSmall),
         const SizedBox(height: 2),
         Text(
-          formatMoney(amount, hidden: hidden),
+          formatMoneyTotals(totals, hidden: hidden, compact: true),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
           style: Theme.of(context).textTheme.labelLarge?.copyWith(
             color: color,
             fontWeight: FontWeight.w700,

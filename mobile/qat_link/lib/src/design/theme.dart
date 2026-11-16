@@ -16,12 +16,12 @@ abstract final class QTheme {
         ).copyWith(
           primary: QColors.brightGreen,
           onPrimary: isDark ? QColors.night : QColors.charcoal,
-          primaryContainer: isDark ? const Color(0xFF173D27) : QColors.softMint,
+          primaryContainer: isDark ? const Color(0xFF123B3F) : QColors.softMint,
           onPrimaryContainer: isDark ? QColors.lightGreen : QColors.charcoal,
           secondary: QColors.freshGreen,
           onSecondary: QColors.charcoal,
           secondaryContainer: isDark
-              ? const Color(0xFF1C3427)
+              ? const Color(0xFF123B3F)
               : QColors.softMint,
           onSecondaryContainer: isDark ? QColors.pureWhite : QColors.charcoal,
           surface: isDark ? QColors.nightSurface : QColors.pearlWhite,
@@ -30,10 +30,10 @@ abstract final class QTheme {
               ? QColors.nightCard
               : QColors.pureWhite,
           onSurfaceVariant: isDark ? QColors.nightMuted : QColors.neutralGray,
-          outline: isDark ? const Color(0xFF385044) : const Color(0xFFDDE8E1),
+          outline: isDark ? const Color(0xFF334155) : const Color(0xFFD6E6EA),
           outlineVariant: isDark
-              ? const Color(0xFF243A2E)
-              : const Color(0xFFEAF2ED),
+              ? const Color(0xFF273449)
+              : const Color(0xFFE4EFF0),
           error: isDark ? const Color(0xFFFFB4AB) : QColors.rejectedFg,
           onError: isDark ? const Color(0xFF690005) : QColors.pureWhite,
           errorContainer: QColors.rejectedBg,
@@ -62,7 +62,7 @@ abstract final class QTheme {
       brightness: brightness,
       colorScheme: scheme,
       scaffoldBackgroundColor: isDark ? QColors.night : QColors.pearlWhite,
-      fontFamily: 'IBM Plex Sans Arabic',
+      fontFamily: 'Cairo',
       visualDensity: VisualDensity.standard,
     );
 
@@ -169,7 +169,7 @@ abstract final class QTheme {
       ),
       navigationBarTheme: NavigationBarThemeData(
         backgroundColor: isDark ? QColors.nightSurface : QColors.pureWhite,
-        indicatorColor: isDark ? const Color(0xFF1E4A30) : QColors.softMint,
+        indicatorColor: isDark ? const Color(0xFF123B3F) : QColors.softMint,
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         height: 72,
@@ -209,6 +209,7 @@ abstract final class QTheme {
       height: height,
       letterSpacing: 0,
       fontFeatures: const [FontFeature.tabularFigures()],
+      fontVariations: [FontVariation('wght', weight.value.toDouble())],
     );
   }
 }

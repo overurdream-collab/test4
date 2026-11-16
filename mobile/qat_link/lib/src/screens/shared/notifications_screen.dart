@@ -4,6 +4,7 @@ import '../../design/components.dart';
 import '../../design/tokens.dart';
 import '../../format.dart';
 import '../../models.dart';
+import '../../state/app_state.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -89,7 +90,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                   )
                 else
                   for (final notification in notifications) ...[
-                    _NotificationCard(notification: notification),
+                    _NotificationCard(
+                      notification: notification,
+                      onOpen: () =>
+                          _openNotification(context, state, notification),
+                    ),
                     const SizedBox(height: QSpace.sm),
                   ],
                 const SizedBox(height: QSpace.lg),
@@ -102,21 +107,25 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 QCard(
                   child: Column(
                     children: [
-                      SwitchListTile(
+                      const SwitchListTile(
                         contentPadding: EdgeInsets.zero,
-                        value: state.appNotificationsEnabled,
-                        onChanged: state.toggleAppNotifications,
-                        title: const Text('إشعارات التطبيق'),
-                        subtitle: const Text('العمليات الجديدة والموافقات'),
+                        value: true,
+                        onChanged: null,
+                        title: Text('إشعارات التطبيق'),
+                        subtitle: Text('إلزامية لجميع الحسابات'),
                       ),
-                      const Divider(),
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        value: state.reminderNotificationsEnabled,
-                        onChanged: state.toggleReminderNotifications,
-                        title: const Text('تذكيرات الديون'),
-                        subtitle: const Text('تنبيه بالمبالغ المعلقة'),
-                      ),
+                      if (state.accountType == AccountType.merchant) ...[
+                        const Divider(),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          value: state.reminderNotificationsEnabled,
+                          onChanged: state.toggleReminderNotifications,
+                          title: const Text('تنبيهات التاجر'),
+                          subtitle: const Text(
+                            'يمكن تعطيلها دون بقية الإشعارات',
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -127,16 +136,105 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       ),
     );
   }
+
+  Future<void> _openNotification(
+    BuildContext context,
+    AppState state,
+    AppNotification notification,
+  ) async {
+    state.markNotificationRead(notification.id);
+    final invitationId = notification.invitationId;
+    if (invitationId != null) {
+      final decision = await showModalBottomSheet<String>(
+        context: context,
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(QRadius.xl)),
+        ),
+        builder: (context) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(QSpace.xl),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                QSheetHeader(
+                  title: notification.title,
+                  subtitle: notification.body,
+                  onClose: () => Navigator.of(context).pop(),
+                ),
+                const SizedBox(height: QSpace.lg),
+                QGradientButton(
+                  label: 'قبول الدعوة',
+                  icon: Icons.check_rounded,
+                  onPressed: () => Navigator.of(context).pop('accepted'),
+                ),
+                const SizedBox(height: QSpace.sm),
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.of(context).pop('rejected'),
+                  icon: const Icon(Icons.close_rounded),
+                  label: const Text('رفض الدعوة'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      if (decision == null) return;
+      try {
+        await state.decideInvitation(
+          invitationId: invitationId,
+          decision: decision,
+        );
+        if (context.mounted) {
+          QToast.show(
+            context,
+            decision == 'accepted' ? 'تم قبول الدعوة' : 'تم رفض الدعوة',
+          );
+        }
+      } on Object {
+        if (context.mounted) {
+          QToast.show(context, 'تعذر تنفيذ الطلب. أعد المحاولة.', error: true);
+        }
+      }
+      return;
+    }
+    if (!context.mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(notification.title),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(notification.body),
+            const SizedBox(height: QSpace.md),
+            Text(
+              formatDateTime(notification.at),
+              style: Theme.of(context).textTheme.labelSmall,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('تم'),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _NotificationCard extends StatelessWidget {
-  const _NotificationCard({required this.notification});
+  const _NotificationCard({required this.notification, required this.onOpen});
 
   final AppNotification notification;
+  final VoidCallback onOpen;
 
   @override
   Widget build(BuildContext context) {
-    final state = QScope.of(context);
     final (icon, color) = switch (notification.kind) {
       NotificationKind.app => (
         Icons.receipt_long_outlined,
@@ -146,7 +244,7 @@ class _NotificationCard extends StatelessWidget {
       NotificationKind.admin => (Icons.shield_outlined, QColors.charcoal),
     };
     return QCard(
-      onTap: () => state.markNotificationRead(notification.id),
+      onTap: onOpen,
       borderColor: notification.read
           ? null
           : QColors.brightGreen.withValues(alpha: 0.45),

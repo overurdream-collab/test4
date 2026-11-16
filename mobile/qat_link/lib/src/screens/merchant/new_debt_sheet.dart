@@ -22,6 +22,7 @@ class _NewDebtSheetState extends State<NewDebtSheet> {
   final _searchController = TextEditingController();
   String? _customerId;
   DateTime _date = DateTime.now();
+  String _currency = defaultCurrency;
   bool _creditConfirmed = false;
   bool _saving = false;
 
@@ -54,11 +55,14 @@ class _NewDebtSheetState extends State<NewDebtSheet> {
         : state.contactById(_customerId!);
     final amountMinor =
         (int.tryParse(_amountController.text.trim()) ?? 0) * 100;
+    final limitMinor = selected?.creditLimitFor(_currency) ?? 0;
     final exceedsLimit =
         selected != null &&
-        selected.creditLimitMinor > 0 &&
-        selected.balanceMinor + selected.pendingMinor + amountMinor >
-            selected.creditLimitMinor;
+        limitMinor > 0 &&
+        selected.balanceFor(_currency) +
+                selected.pendingFor(_currency) +
+                amountMinor >
+            limitMinor;
 
     return Padding(
       padding: EdgeInsets.only(
@@ -188,7 +192,7 @@ class _NewDebtSheetState extends State<NewDebtSheet> {
                       style: Theme.of(context).textTheme.titleSmall,
                     ),
                     Text(
-                      'الرصيد: ${formatMoney(selected.balanceMinor, hidden: state.hideAmounts)}',
+                      'الرصيد: ${formatMoneyTotals(selected.balancesMinor, hidden: state.hideAmounts)}',
                       style: Theme.of(context).textTheme.labelSmall,
                     ),
                   ],
@@ -198,6 +202,33 @@ class _NewDebtSheetState extends State<NewDebtSheet> {
             ],
           ),
         ),
+        const SizedBox(height: QSpace.md),
+        Wrap(
+          spacing: QSpace.sm,
+          children: [
+            for (final currency in supportedCurrencies)
+              ChoiceChip(
+                label: Text('${currencyLabels[currency] ?? currency} $currency'),
+                selected: _currency == currency,
+                onSelected: (_) => setState(() {
+                  _currency = currency;
+                  _creditConfirmed = false;
+                }),
+              ),
+          ],
+        ),
+        if (selected.creditLimitFor(_currency) > 0) ...[
+          const SizedBox(height: QSpace.sm),
+          QCreditLimitBar(
+            usedMinor:
+                selected.balanceFor(_currency) +
+                selected.pendingFor(_currency),
+            limitMinor: selected.creditLimitFor(_currency),
+            currency: _currency,
+            hidden: state.hideAmounts,
+            label: 'الحد الائتماني ($_currency)',
+          ),
+        ],
         const SizedBox(height: QSpace.lg),
         TextField(
           controller: _amountController,
@@ -205,11 +236,11 @@ class _NewDebtSheetState extends State<NewDebtSheet> {
           autofocus: true,
           onChanged: (_) => setState(() {}),
           style: Theme.of(context).textTheme.headlineMedium,
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             labelText: 'المبلغ',
             hintText: '0',
-            suffixText: 'ر.ي',
-            prefixIcon: Icon(Icons.payments_outlined),
+            suffixText: currencyLabels[_currency] ?? _currency,
+            prefixIcon: const Icon(Icons.payments_outlined),
           ),
         ),
         const SizedBox(height: QSpace.md),
@@ -341,6 +372,7 @@ class _NewDebtSheetState extends State<NewDebtSheet> {
       note: _noteController.text.trim().isEmpty
           ? null
           : _noteController.text.trim(),
+      currency: _currency,
     );
     if (!mounted) return;
     Navigator.of(context).pop();

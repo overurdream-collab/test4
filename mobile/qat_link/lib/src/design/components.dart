@@ -80,6 +80,39 @@ class QLogoMark extends StatelessWidget {
   }
 }
 
+class QBrandAvatar extends StatelessWidget {
+  const QBrandAvatar({
+    super.key,
+    this.size = 52,
+    this.showGlow = false,
+    this.borderColor = QColors.brightGreen,
+  });
+
+  final double size;
+  final bool showGlow;
+  final Color borderColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: QColors.softMint,
+        shape: BoxShape.circle,
+        border: Border.all(color: borderColor, width: size >= 56 ? 3 : 2),
+        boxShadow: showGlow ? QColors.brandGlow : null,
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Image.asset(
+        'assets/brand/qatlink_mascot.jpg',
+        fit: BoxFit.cover,
+        alignment: Alignment.topCenter,
+      ),
+    );
+  }
+}
+
 class _LeafLinkPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
@@ -322,6 +355,160 @@ class QMoney extends StatelessWidget {
   }
 }
 
+class QMoneyTotals extends StatelessWidget {
+  const QMoneyTotals({
+    required this.totals,
+    super.key,
+    this.style,
+    this.color,
+    this.hidden,
+    this.compact = false,
+    this.textAlign,
+  });
+
+  final Map<String, int> totals;
+  final TextStyle? style;
+  final Color? color;
+  final bool? hidden;
+  final bool compact;
+  final TextAlign? textAlign;
+
+  @override
+  Widget build(BuildContext context) {
+    final state = QScope.of(context);
+    final isHidden = hidden ?? state.hideAmounts;
+    return Text(
+      formatMoneyTotals(totals, hidden: isHidden, compact: compact),
+      textAlign: textAlign,
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      style: (style ?? Theme.of(context).textTheme.titleMedium)?.copyWith(
+        color: color,
+        fontFeatures: const [FontFeature.tabularFigures()],
+      ),
+    );
+  }
+}
+
+class QSummaryCircle extends StatelessWidget {
+  const QSummaryCircle({
+    required this.label,
+    required this.color,
+    super.key,
+    this.amountMinor = 0,
+    this.totals,
+    this.size = 86,
+    this.hidden,
+  });
+
+  final String label;
+  final int amountMinor;
+  final Map<String, int>? totals;
+  final Color color;
+  final double size;
+  final bool? hidden;
+
+  @override
+  Widget build(BuildContext context) {
+    final state = QScope.of(context);
+    final isHidden = hidden ?? state.hideAmounts;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: size,
+          height: size,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: color.withValues(alpha: 0.10),
+            border: Border.all(color: color.withValues(alpha: 0.5), width: 2),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(QSpace.xs),
+            child: Text(
+              isHidden
+                  ? '••••'
+                  : totals != null
+                  ? formatMoneyTotals(totals!, compact: true)
+                  : formatCompactMoney(amountMinor),
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                color: color,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: QSpace.xs),
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            color: color,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class QQuickAction extends StatelessWidget {
+  const QQuickAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    super.key,
+    this.color = QColors.brightGreen,
+    this.background = QColors.softMint,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+  final Color color;
+  final Color background;
+
+  @override
+  Widget build(BuildContext context) {
+    return QCard(
+      onTap: onTap,
+      padding: const EdgeInsets.symmetric(
+        horizontal: QSpace.xs,
+        vertical: QSpace.md,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: background,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, size: 20, color: color),
+          ),
+          const SizedBox(height: QSpace.xs),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: Theme.of(
+              context,
+            ).textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class QCard extends StatelessWidget {
   const QCard({
     required this.child,
@@ -348,7 +535,7 @@ class QCard extends StatelessWidget {
       side: BorderSide(
         color:
             borderColor ??
-            (isDark ? const Color(0xFF243A2E) : const Color(0xFFE7F1EB)),
+            (isDark ? const Color(0xFF273449) : const Color(0xFFE4EFF0)),
       ),
     );
     final content = Ink(
@@ -509,6 +696,8 @@ class QBalanceRing extends StatelessWidget {
     this.hidden = false,
     this.secondaryLabel,
     this.secondaryAmountMinor,
+    this.totals,
+    this.secondaryTotals,
   });
 
   final int amountMinor;
@@ -519,6 +708,8 @@ class QBalanceRing extends StatelessWidget {
   final bool hidden;
   final String? secondaryLabel;
   final int? secondaryAmountMinor;
+  final Map<String, int>? totals;
+  final Map<String, int>? secondaryTotals;
 
   @override
   Widget build(BuildContext context) {
@@ -538,17 +729,27 @@ class QBalanceRing extends StatelessWidget {
               ),
               const SizedBox(height: QSpace.xs),
               Text(
-                formatMoney(amountMinor, currency: currency, hidden: hidden),
+                totals != null
+                    ? formatMoneyTotals(totals!, hidden: hidden, compact: true)
+                    : formatMoney(
+                        amountMinor,
+                        currency: currency,
+                        hidden: hidden,
+                      ),
                 textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                   fontWeight: FontWeight.w700,
                 ),
               ),
-              if (secondaryAmountMinor != null) ...[
+              if (secondaryAmountMinor != null || secondaryTotals != null) ...[
                 const SizedBox(height: QSpace.xs),
                 Text(
-                  '${secondaryLabel ?? 'معلق'}: ${formatMoney(secondaryAmountMinor!, currency: currency, hidden: hidden)}',
+                  '${secondaryLabel ?? 'معلق'}: ${secondaryTotals != null ? formatMoneyTotals(secondaryTotals!, hidden: hidden, compact: true) : formatMoney(secondaryAmountMinor!, currency: currency, hidden: hidden)}',
                   textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: Theme.of(
                     context,
                   ).textTheme.labelSmall?.copyWith(color: QColors.pendingFg),
@@ -715,12 +916,25 @@ class QEntryTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = QScope.of(context);
-    final isPayment =
-        entry.type == OperationType.payment ||
-        entry.type == OperationType.refund ||
-        entry.type == OperationType.salesReturn;
-    final sign = isPayment ? '−' : '+';
-    final amountColor = isPayment ? QColors.approvedFg : QColors.charcoal;
+    final effect = state.effectOf(entry);
+    final isDecrease = effect == OperationEffect.decrease;
+    final isNeutral = effect == OperationEffect.neutral;
+    final sign = effect.sign;
+    final amountColor = isNeutral
+        ? QColors.neutralGray
+        : isDecrease
+        ? QColors.approvedFg
+        : QColors.charcoal;
+    final background = isNeutral
+        ? QColors.neutralGray.withValues(alpha: 0.12)
+        : isDecrease
+        ? QColors.approvedBg
+        : QColors.softMint;
+    final foreground = isNeutral
+        ? QColors.neutralGray
+        : isDecrease
+        ? QColors.approvedFg
+        : QColors.brightGreen;
     final displayTitle =
         title ??
         entry.productName ??
@@ -739,13 +953,17 @@ class QEntryTile extends StatelessWidget {
               width: 44,
               height: 44,
               decoration: BoxDecoration(
-                color: isPayment ? QColors.approvedBg : QColors.softMint,
+                color: background,
                 borderRadius: BorderRadius.circular(14),
               ),
               child: Icon(
-                isPayment ? Icons.south_west_rounded : Icons.north_east_rounded,
+                isNeutral
+                    ? Icons.swap_horiz_rounded
+                    : isDecrease
+                    ? Icons.south_west_rounded
+                    : Icons.north_east_rounded,
                 size: 20,
-                color: isPayment ? QColors.approvedFg : QColors.brightGreen,
+                color: foreground,
               ),
             ),
             const SizedBox(width: QSpace.md),
@@ -792,7 +1010,7 @@ class QEntryTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                  '$sign ${formatMoney(entry.amountMinor, hidden: state.hideAmounts)}',
+                  '$sign ${formatMoney(isNeutral ? state.effectAmountOf(entry) : effect.apply(state.effectAmountOf(entry)).abs(), currency: entry.currency, hidden: state.hideAmounts)}',
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
                     color: amountColor,
                     fontWeight: FontWeight.w700,
@@ -898,16 +1116,21 @@ class QContactTile extends StatelessWidget {
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text(
-                  formatMoney(contact.balanceMinor, hidden: state.hideAmounts),
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    color: QColors.approvedFg,
-                    fontWeight: FontWeight.w700,
-                  ),
+                QMoneyTotals(
+                  totals: contact.balancesMinor,
+                  hidden: state.hideAmounts,
+                  style: Theme.of(context).textTheme.titleSmall,
+                  color: QColors.approvedFg,
+                  textAlign: TextAlign.end,
                 ),
-                if (contact.pendingMinor > 0)
+                if (contact.pendingByCurrencyMinor.values.any(
+                  (value) => value != 0,
+                ))
                   Text(
-                    'معلق ${formatMoney(contact.pendingMinor, hidden: state.hideAmounts)}',
+                    'معلق ${formatMoneyTotals(contact.pendingByCurrencyMinor, hidden: state.hideAmounts)}',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.end,
                     style: Theme.of(
                       context,
                     ).textTheme.labelSmall?.copyWith(color: QColors.pendingFg),
@@ -1094,6 +1317,46 @@ class QLoadingCard extends StatelessWidget {
   }
 }
 
+class QCreditLimitBars extends StatelessWidget {
+  const QCreditLimitBars({
+    required this.limitsMinor,
+    required this.usedMinor,
+    super.key,
+    this.hidden = false,
+  });
+
+  final Map<String, int> limitsMinor;
+  final Map<String, int> usedMinor;
+  final bool hidden;
+
+  @override
+  Widget build(BuildContext context) {
+    final currencies = limitsMinor.entries
+        .where((entry) => entry.value > 0)
+        .toList();
+    if (currencies.isEmpty) {
+      return Text(
+        'لم يُحدد حد ائتماني بعد',
+        style: Theme.of(context).textTheme.labelSmall,
+      );
+    }
+    return Column(
+      children: [
+        for (var index = 0; index < currencies.length; index++) ...[
+          QCreditLimitBar(
+            usedMinor: usedMinor[currencies[index].key] ?? 0,
+            limitMinor: currencies[index].value,
+            currency: currencies[index].key,
+            hidden: hidden,
+          ),
+          if (index != currencies.length - 1)
+            const SizedBox(height: QSpace.sm),
+        ],
+      ],
+    );
+  }
+}
+
 class QCreditLimitBar extends StatelessWidget {
   const QCreditLimitBar({
     required this.usedMinor,
@@ -1101,12 +1364,14 @@ class QCreditLimitBar extends StatelessWidget {
     super.key,
     this.currency = 'YER',
     this.hidden = false,
+    this.label = 'الحد الائتماني',
   });
 
   final int usedMinor;
   final int limitMinor;
   final String currency;
   final bool hidden;
+  final String label;
 
   @override
   Widget build(BuildContext context) {
@@ -1120,7 +1385,7 @@ class QCreditLimitBar extends StatelessWidget {
         Row(
           children: [
             Text(
-              'الحد الائتماني',
+              label,
               style: Theme.of(context).textTheme.labelMedium,
             ),
             const SizedBox(width: QSpace.sm),

@@ -4,8 +4,10 @@ const STORAGE = {
   device: 'qatlink.admin.device',
 };
 
+const defaultApiBase = `http://${window.location.hostname || 'localhost'}:8080`;
+
 const state = {
-  apiBase: localStorage.getItem(STORAGE.api) || 'http://localhost:8080',
+  apiBase: localStorage.getItem(STORAGE.api) || defaultApiBase,
   phone: '',
   tokens: readTokens(),
   profile: null,
@@ -24,6 +26,13 @@ const phoneInput = el('phone');
 const otpInput = el('otp');
 const form = el('otp-form');
 const toggle = el('sales-returns-toggle');
+const adForm = el('ad-form');
+const adImage = el('ad-image');
+const adTitle = el('ad-title');
+const uploadAdButton = el('upload-ad');
+const adsMessage = el('ads-message');
+const adsList = el('ads-list');
+const adsCount = el('ads-count');
 
 apiInput.value = state.apiBase;
 
@@ -79,6 +88,7 @@ function setBusy(value) {
   el('change-phone').disabled = value;
   el('refresh').disabled = value;
   toggle.disabled = value || !toggle.dataset.ready;
+  if (uploadAdButton) uploadAdButton.disabled = value;
 }
 
 async function refreshTokens() {
@@ -205,13 +215,15 @@ function resetLogin() {
 async function openDashboard() {
   setMessage(dashboardMessage, 'جارٍ تحميل البيانات...');
   try {
-    const [me, service] = await Promise.all([
+    const [me, service, ads] = await Promise.all([
       api('/v1/me'),
       api('/v1/admin/service-controls/sales-returns'),
+      api('/v1/admin/ads'),
     ]);
     state.profile = me.user;
     el('admin-identity').textContent = `${me.user.displayName || me.user.phoneE164} • ${me.user.phoneE164}`;
     renderService(service);
+    renderAds(ads);
     loginView.hidden = true;
     dashboardView.hidden = false;
     setMessage(dashboardMessage, '');
@@ -263,8 +275,12 @@ async function refreshDashboard() {
   setBusy(true);
   setMessage(dashboardMessage, 'جارٍ التحديث...');
   try {
-    const service = await api('/v1/admin/service-controls/sales-returns');
+    const [service, ads] = await Promise.all([
+      api('/v1/admin/service-controls/sales-returns'),
+      api('/v1/admin/ads'),
+    ]);
     renderService(service);
+    renderAds(ads);
     setMessage(dashboardMessage, '');
   } catch (error) {
     setMessage(dashboardMessage, errorText(error), 'error');
@@ -272,6 +288,117 @@ async function refreshDashboard() {
     setBusy(false);
     toggle.dataset.ready = 'true';
     toggle.disabled = false;
+  }
+}
+
+function adImageUrl(imageUrl) {
+  if (!imageUrl) return '';
+  return /^https?:/i.test(imageUrl) ? imageUrl : `${state.apiBase}${imageUrl}`;
+}
+
+function renderAds(payload) {
+  const ads = Array.isArray(payload?.ads) ? payload.ads : [];
+  adsCount.textContent = `${ads.length} / 5`;
+  adsList.replaceChildren();
+  if (ads.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'ads-empty';
+    empty.textContent = 'لا توجد إعلانات مرفوعة بعد.';
+    adsList.append(empty);
+    return;
+  }
+  for (const ad of ads) {
+    const card = document.createElement('div');
+    card.className = 'ad-card';
+
+    const image = document.createElement('img');
+    image.src = adImageUrl(ad.imageUrl);
+    image.alt = ad.title || 'إعلان';
+    image.loading = 'lazy';
+
+    const body = document.createElement('div');
+    body.className = 'ad-card-body';
+
+    const title = document.createElement('strong');
+    title.textContent = ad.title || 'إعلان بدون عنوان';
+
+    const meta = document.createElement('small');
+    meta.textContent = ad.createdAt
+      ? new Date(ad.createdAt).toLocaleString('ar-YE')
+      : '—';
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.textContent = 'حذف الإعلان';
+    remove.addEventListener('click', () => deleteAd(ad.id));
+
+    body.append(title, meta, remove);
+    card.append(image, body);
+    adsList.append(card);
+  }
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('تعذر قراءة الصورة.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadAd(event) {
+  event.preventDefault();
+  if (state.busy) return;
+  const file = adImage.files?.[0];
+  if (!file) {
+    setMessage(adsMessage, 'اختر صورة الإعلان أولاً.', 'error');
+    return;
+  }
+  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+    setMessage(adsMessage, 'نوع الصورة غير مدعوم.', 'error');
+    return;
+  }
+  if (file.size > 2 * 1024 * 1024) {
+    setMessage(adsMessage, 'حجم الصورة يتجاوز 2MB.', 'error');
+    return;
+  }
+  setBusy(true);
+  setMessage(adsMessage, 'جارٍ رفع الإعلان...');
+  try {
+    const imageDataUrl = await readFileAsDataUrl(file);
+    await api('/v1/admin/ads', {
+      method: 'POST',
+      body: JSON.stringify({
+        imageDataUrl,
+        ...(adTitle.value.trim() ? { title: adTitle.value.trim() } : {}),
+      }),
+    });
+    adForm.reset();
+    const ads = await api('/v1/admin/ads');
+    renderAds(ads);
+    setMessage(adsMessage, 'تم رفع الإعلان.', 'success');
+  } catch (error) {
+    setMessage(adsMessage, errorText(error), 'error');
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function deleteAd(id) {
+  if (state.busy) return;
+  if (!window.confirm('حذف هذا الإعلان نهائياً؟')) return;
+  setBusy(true);
+  setMessage(adsMessage, 'جارٍ حذف الإعلان...');
+  try {
+    await api(`/v1/admin/ads/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const ads = await api('/v1/admin/ads');
+    renderAds(ads);
+    setMessage(adsMessage, 'تم حذف الإعلان.', 'success');
+  } catch (error) {
+    setMessage(adsMessage, errorText(error), 'error');
+  } finally {
+    setBusy(false);
   }
 }
 
@@ -295,6 +422,7 @@ el('change-phone').addEventListener('click', resetLogin);
 el('refresh').addEventListener('click', refreshDashboard);
 el('logout').addEventListener('click', logout);
 toggle.addEventListener('change', toggleService);
+adForm.addEventListener('submit', uploadAd);
 
 if (state.tokens?.refreshToken) {
   openDashboard().catch((error) => {

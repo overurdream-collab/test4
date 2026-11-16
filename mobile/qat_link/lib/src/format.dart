@@ -1,3 +1,5 @@
+import 'models.dart';
+
 const currencyLabels = <String, String>{
   'YER': 'ر.ي',
   'SAR': 'ر.س',
@@ -21,6 +23,31 @@ String formatMoney(int minor, {String currency = 'YER', bool hidden = false}) {
   if (hidden) return '••••••';
   final major = (minor / 100).round();
   return '${formatNumber(major)} ${currencyLabels[currency] ?? currency}';
+}
+
+String formatMoneyTotals(
+  Map<String, int> totals, {
+  bool hidden = false,
+  bool compact = false,
+  bool includeZero = false,
+}) {
+  if (hidden) return '••••••';
+  final ordered = <String>[
+    ...supportedCurrencies.where(totals.containsKey),
+    ...totals.keys.where((currency) => !supportedCurrencies.contains(currency)),
+  ];
+  final parts = <String>[];
+  for (final currency in ordered) {
+    final value = totals[currency] ?? 0;
+    if (value == 0 && !includeZero) continue;
+    parts.add(
+      compact
+          ? formatCompactMoney(value, currency: currency)
+          : formatMoney(value, currency: currency),
+    );
+  }
+  if (parts.isEmpty) return '0';
+  return parts.join(' • ');
 }
 
 String formatCompactMoney(int minor, {String currency = 'YER'}) {
@@ -80,6 +107,15 @@ String formatDateTime(DateTime value) {
 
 String monthLabel(DateTime value) =>
     '${_months[value.month - 1]} ${value.year}';
+
+String formatPhoneLocal(String value) {
+  final digits = value.replaceAll(RegExp(r'[^0-9]'), '');
+  final local = digits.startsWith('967') ? digits.substring(3) : digits;
+  if (local.length == 9) {
+    return '${local.substring(0, 3)} ${local.substring(3, 6)} ${local.substring(6)}';
+  }
+  return local;
+}
 
 String initials(String value) {
   final parts = value.trim().split(RegExp(r'\s+'));

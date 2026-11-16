@@ -135,7 +135,7 @@ class CustomerDetailScreen extends StatelessWidget {
                           Expanded(
                             child: _MiniBalance(
                               label: 'المعتمد',
-                              amount: current.balanceMinor,
+                              totals: current.balancesMinor,
                               color: QColors.approvedFg,
                               background: QColors.approvedBg,
                             ),
@@ -144,7 +144,7 @@ class CustomerDetailScreen extends StatelessWidget {
                           Expanded(
                             child: _MiniBalance(
                               label: 'المعلق',
-                              amount: current.pendingMinor,
+                              totals: state.pendingNetByCurrency(entries),
                               color: QColors.pendingFg,
                               background: QColors.pendingBg,
                             ),
@@ -152,9 +152,14 @@ class CustomerDetailScreen extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: QSpace.lg),
-                      QCreditLimitBar(
-                        usedMinor: current.balanceMinor + current.pendingMinor,
-                        limitMinor: current.creditLimitMinor,
+                      QCreditLimitBars(
+                        limitsMinor: current.creditLimitsMinor,
+                        usedMinor: {
+                          for (final currency in current.creditLimitsMinor.keys)
+                            currency:
+                                current.balanceFor(currency) +
+                                current.pendingFor(currency),
+                        },
                         hidden: state.hideAmounts,
                       ),
                     ],
@@ -332,13 +337,13 @@ class CustomerDetailScreen extends StatelessWidget {
 class _MiniBalance extends StatelessWidget {
   const _MiniBalance({
     required this.label,
-    required this.amount,
+    required this.totals,
     required this.color,
     required this.background,
   });
 
   final String label;
-  final int amount;
+  final Map<String, int> totals;
   final Color color;
   final Color background;
 
@@ -361,8 +366,8 @@ class _MiniBalance extends StatelessWidget {
             ).textTheme.labelSmall?.copyWith(color: color),
           ),
           const SizedBox(height: 2),
-          QMoney(
-            minor: amount,
+          QMoneyTotals(
+            totals: totals,
             color: color,
             style: Theme.of(context).textTheme.titleMedium,
             hidden: state.hideAmounts,
@@ -426,14 +431,24 @@ class _InlineActions extends StatelessWidget {
         children: [
           Expanded(
             child: OutlinedButton(
-              onPressed: () => state.declineEdit(entry.id),
+              onPressed: () async {
+                final changed = await state.declineEdit(entry.id);
+                if (!changed && context.mounted) {
+                  QToast.show(context, 'رفض البديل غير متاح بعد');
+                }
+              },
               child: const Text('رفض البديل'),
             ),
           ),
           const SizedBox(width: QSpace.sm),
           Expanded(
             child: FilledButton(
-              onPressed: () => state.acceptEdit(entry.id),
+              onPressed: () async {
+                final changed = await state.acceptEdit(entry.id);
+                if (!changed && context.mounted) {
+                  QToast.show(context, 'قبول البديل غير متاح بعد');
+                }
+              },
               child: const Text('قبول البديل'),
             ),
           ),
@@ -483,7 +498,9 @@ class _InlineActions extends StatelessWidget {
         content: TextField(
           controller: controller,
           keyboardType: TextInputType.number,
-          decoration: const InputDecoration(labelText: 'المبلغ البديل بالريال'),
+          decoration: InputDecoration(
+            labelText: 'المبلغ البديل (${entry.currency})',
+          ),
         ),
         actions: [
           TextButton(
@@ -501,8 +518,17 @@ class _InlineActions extends StatelessWidget {
       ),
     );
     if (amount != null) {
-      state.requestEdit(entry.id, amount, 'طلب تعديل من التاجر');
-      if (context.mounted) QToast.show(context, 'تم إرسال طلب التعديل');
+      final sent = await state.requestEdit(
+        entry.id,
+        amount,
+        'طلب تعديل من التاجر',
+      );
+      if (context.mounted) {
+        QToast.show(
+          context,
+          sent ? 'تم إرسال طلب التعديل' : 'طلب التعديل غير متاح بعد',
+        );
+      }
     }
   }
 }
