@@ -294,13 +294,21 @@ class _StatsRow extends StatelessWidget {
         ? [
             (
               label: 'المستحق',
-              value: formatCompactMoney(state.approvedReceivable),
+              value: formatMoneyTotals(
+                state.approvedReceivableByCurrency,
+                hidden: state.hideAmounts,
+                compact: true,
+              ),
               color: QColors.approvedFg,
               background: QColors.approvedBg,
             ),
             (
               label: 'المعلق',
-              value: formatCompactMoney(state.pendingReceivable),
+              value: formatMoneyTotals(
+                state.pendingNetByCurrency(state.merchantEntries),
+                hidden: state.hideAmounts,
+                compact: true,
+              ),
               color: QColors.pendingFg,
               background: QColors.pendingBg,
             ),
@@ -314,13 +322,21 @@ class _StatsRow extends StatelessWidget {
         : [
             (
               label: 'المستحق',
-              value: formatCompactMoney(state.customerApprovedTotal),
+              value: formatMoneyTotals(
+                state.customerApprovedByCurrency,
+                hidden: state.hideAmounts,
+                compact: true,
+              ),
               color: QColors.approvedFg,
               background: QColors.approvedBg,
             ),
             (
               label: 'المعلق',
-              value: formatCompactMoney(state.customerPendingTotal),
+              value: formatMoneyTotals(
+                state.pendingNetByCurrency(state.customerEntries),
+                hidden: state.hideAmounts,
+                compact: true,
+              ),
               color: QColors.pendingFg,
               background: QColors.pendingBg,
             ),
@@ -351,7 +367,7 @@ class _StatsRow extends StatelessWidget {
                   const SizedBox(height: QSpace.sm),
                   Text(
                     stats[index].value,
-                    maxLines: 1,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       color: stats[index].color,

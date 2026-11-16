@@ -175,15 +175,16 @@ class _StoreCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final collected = state.merchantEntries
-        .where(
-          (entry) =>
-              entry.status == TxStatus.approved &&
-              (entry.type == OperationType.payment ||
-                  entry.type == OperationType.refund ||
-                  entry.type == OperationType.salesReturn),
-        )
-        .fold<int>(0, (total, entry) => total + entry.amountMinor);
+    final collected = <String, int>{};
+    for (final entry in state.merchantEntries) {
+      if (entry.status != TxStatus.approved) continue;
+      if (entry.type != OperationType.payment &&
+          state.effectOf(entry) != OperationEffect.decrease) {
+        continue;
+      }
+      collected[entry.currency] =
+          (collected[entry.currency] ?? 0) + entry.amountMinor;
+    }
     return QCard(
       padding: const EdgeInsets.all(QSpace.xl),
       gradient: QColors.gradient,
@@ -251,16 +252,21 @@ class _StoreCard extends StatelessWidget {
           const SizedBox(height: QSpace.lg),
           Row(
             children: [
-              Text(
-                'الريال اليمني',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                  color: QColors.pureWhite,
-                  fontWeight: FontWeight.w700,
+              Expanded(
+                child: Text(
+                  'الأرصدة حسب العملة',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    color: QColors.pureWhite,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
-              const Spacer(),
+              const SizedBox(width: QSpace.sm),
               Text(
-                'YER · ﷼',
+                'YER · SAR · USD',
+                maxLines: 1,
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
                   color: Colors.white.withValues(alpha: 0.78),
                 ),
@@ -274,14 +280,10 @@ class _StoreCard extends StatelessWidget {
               color: Colors.white.withValues(alpha: 0.8),
             ),
           ),
-          Text(
-            formatMoney(state.approvedReceivable, hidden: state.hideAmounts),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-              color: QColors.pureWhite,
-              fontWeight: FontWeight.w900,
-            ),
+          QMoneyTotals(
+            totals: state.approvedReceivableByCurrency,
+            style: Theme.of(context).textTheme.headlineMedium,
+            color: QColors.pureWhite,
           ),
           const SizedBox(height: QSpace.lg),
           Row(
@@ -289,14 +291,22 @@ class _StoreCard extends StatelessWidget {
               Expanded(
                 child: _CurrencyPill(
                   label: 'المسدد',
-                  value: formatCompactMoney(collected),
+                  value: formatMoneyTotals(
+                    collected,
+                    hidden: state.hideAmounts,
+                    compact: true,
+                  ),
                 ),
               ),
               const SizedBox(width: QSpace.sm),
               Expanded(
                 child: _CurrencyPill(
                   label: 'العالق',
-                  value: formatCompactMoney(state.pendingReceivable),
+                  value: formatMoneyTotals(
+                    state.pendingNetByCurrency(state.merchantEntries),
+                    hidden: state.hideAmounts,
+                    compact: true,
+                  ),
                 ),
               ),
               const SizedBox(width: QSpace.sm),
@@ -439,23 +449,20 @@ class _TodaySection extends StatelessWidget {
           entry.createdAt.month == now.month &&
           entry.createdAt.day == now.day,
     );
-    final charges = todayEntries
-        .where(
-          (entry) =>
-              entry.status == TxStatus.approved &&
-              (entry.type == OperationType.charge ||
-                  entry.type == OperationType.creditApplication),
-        )
-        .fold<int>(0, (total, entry) => total + entry.amountMinor);
-    final payments = todayEntries
-        .where(
-          (entry) =>
-              entry.status == TxStatus.approved &&
-              (entry.type == OperationType.payment ||
-                  entry.type == OperationType.refund ||
-                  entry.type == OperationType.salesReturn),
-        )
-        .fold<int>(0, (total, entry) => total + entry.amountMinor);
+    final charges = <String, int>{};
+    final payments = <String, int>{};
+    for (final entry in todayEntries) {
+      if (entry.status != TxStatus.approved) continue;
+      final effect = state.effectOf(entry);
+      if (effect == OperationEffect.increase) {
+        charges[entry.currency] =
+            (charges[entry.currency] ?? 0) + state.effectAmountOf(entry);
+      } else if (entry.type == OperationType.payment ||
+          effect == OperationEffect.decrease) {
+        payments[entry.currency] =
+            (payments[entry.currency] ?? 0) + state.effectAmountOf(entry);
+      }
+    }
     final pending = todayEntries
         .where((entry) => entry.status == TxStatus.pending)
         .length;
@@ -477,7 +484,11 @@ class _TodaySection extends StatelessWidget {
               child: _MetricCard(
                 icon: Icons.north_east_rounded,
                 label: 'دين جديد',
-                value: formatCompactMoney(charges),
+                value: formatMoneyTotals(
+                  charges,
+                  hidden: state.hideAmounts,
+                  compact: true,
+                ),
                 color: QColors.brightGreen,
                 background: QColors.softMint,
               ),
@@ -487,7 +498,11 @@ class _TodaySection extends StatelessWidget {
               child: _MetricCard(
                 icon: Icons.south_west_rounded,
                 label: 'تحصيل',
-                value: formatCompactMoney(payments),
+                value: formatMoneyTotals(
+                  payments,
+                  hidden: state.hideAmounts,
+                  compact: true,
+                ),
                 color: QColors.approvedFg,
                 background: QColors.approvedBg,
               ),
@@ -580,7 +595,7 @@ class _ActivityCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final values = _weeklyValues();
-    final total = _weeklyTotal();
+    final totals = _weeklyTotals();
     return QCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -594,12 +609,10 @@ class _ActivityCard extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: Text(
-                  formatMoney(total, hidden: state.hideAmounts),
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: QColors.charcoal,
-                  ),
+                child: QMoneyTotals(
+                  totals: totals,
+                  style: Theme.of(context).textTheme.headlineSmall,
+                  color: QColors.charcoal,
                 ),
               ),
               const Icon(Icons.trending_up_rounded, color: QColors.brightGreen),
@@ -633,7 +646,7 @@ class _ActivityCard extends StatelessWidget {
         ),
       );
       if (difference.inDays < 0 || difference.inDays > 6) continue;
-      totals[6 - difference.inDays] += entry.amountMinor;
+      totals[6 - difference.inDays] += 1;
     }
     final highest = totals.fold<int>(1, math.max);
     return [
@@ -642,20 +655,21 @@ class _ActivityCard extends StatelessWidget {
     ];
   }
 
-  int _weeklyTotal() {
+  Map<String, int> _weeklyTotals() {
     final now = DateTime.now();
     final start = DateTime(
       now.year,
       now.month,
       now.day,
     ).subtract(const Duration(days: 6));
-    return state.merchantEntries
-        .where(
-          (entry) =>
-              entry.status == TxStatus.approved &&
-              !entry.createdAt.isBefore(start),
-        )
-        .fold<int>(0, (total, entry) => total + entry.amountMinor);
+    final totals = <String, int>{};
+    for (final entry in state.merchantEntries) {
+      if (entry.status != TxStatus.approved) continue;
+      if (entry.createdAt.isBefore(start)) continue;
+      totals[entry.currency] =
+          (totals[entry.currency] ?? 0) + entry.amountMinor;
+    }
+    return totals;
   }
 }
 

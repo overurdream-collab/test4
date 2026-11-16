@@ -13,10 +13,12 @@ class SuppliersScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = QScope.of(context);
     final suppliers = state.suppliers;
-    final total = suppliers.fold<int>(
-      0,
-      (sum, supplier) => sum + supplier.balanceMinor,
-    );
+    final total = <String, int>{};
+    for (final supplier in suppliers) {
+      for (final entry in supplier.balancesMinor.entries) {
+        total[entry.key] = (total[entry.key] ?? 0) + entry.value;
+      }
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -59,8 +61,8 @@ class SuppliersScreen extends StatelessWidget {
                               style: Theme.of(context).textTheme.labelMedium,
                             ),
                             const SizedBox(height: QSpace.xs),
-                            QMoney(
-                              minor: total,
+                            QMoneyTotals(
+                              totals: total,
                               style: Theme.of(context).textTheme.headlineMedium
                                   ?.copyWith(fontWeight: FontWeight.w800),
                               hidden: state.hideAmounts,
@@ -249,15 +251,27 @@ class _SupplierCard extends StatelessWidget {
             children: [
               Text('المستحق', style: Theme.of(context).textTheme.labelSmall),
               Text(
-                formatMoney(supplier.balanceMinor, hidden: state.hideAmounts),
+                formatMoneyTotals(
+                  supplier.balancesMinor,
+                  hidden: state.hideAmounts,
+                  compact: true,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.end,
                 style: Theme.of(context).textTheme.titleSmall?.copyWith(
                   color: QColors.approvedFg,
                   fontWeight: FontWeight.w700,
                 ),
               ),
-              if (supplier.pendingMinor > 0)
+              if (supplier.pendingByCurrencyMinor.values.any(
+                (value) => value != 0,
+              ))
                 Text(
-                  'معلق ${formatMoney(supplier.pendingMinor, hidden: state.hideAmounts)}',
+                  'معلق ${formatMoneyTotals(supplier.pendingByCurrencyMinor, hidden: state.hideAmounts, compact: true)}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.end,
                   style: Theme.of(
                     context,
                   ).textTheme.labelSmall?.copyWith(color: QColors.pendingFg),

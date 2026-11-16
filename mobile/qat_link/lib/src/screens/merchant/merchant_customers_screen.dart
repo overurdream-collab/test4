@@ -38,7 +38,7 @@ class _MerchantCustomersScreenState extends State<MerchantCustomersScreen> {
           customer.phone.contains(query);
       final matchesFilter = switch (_filter) {
         1 => customer.favorite,
-        2 => customer.pendingMinor > 0,
+        2 => customer.pendingByCurrencyMinor.values.any((value) => value > 0),
         3 => !customer.hasApp,
         _ => true,
       };
@@ -48,21 +48,23 @@ class _MerchantCustomersScreenState extends State<MerchantCustomersScreen> {
     customers = [...customers];
     switch (_sort) {
       case 1:
-        customers.sort((a, b) => b.balanceMinor.compareTo(a.balanceMinor));
+        customers.sort(
+          (a, b) => b
+              .balanceFor(b.primaryCurrency)
+              .compareTo(a.balanceFor(a.primaryCurrency)),
+        );
       case 2:
-        customers.sort((a, b) => b.pendingMinor.compareTo(a.pendingMinor));
+        customers.sort(
+          (a, b) => b
+              .pendingFor(b.primaryCurrency)
+              .compareTo(a.pendingFor(a.primaryCurrency)),
+        );
       default:
         customers.sort((a, b) => a.displayName.compareTo(b.displayName));
     }
 
-    final total = state.customers.fold<int>(
-      0,
-      (sum, customer) => sum + customer.balanceMinor,
-    );
-    final pending = state.customers.fold<int>(
-      0,
-      (sum, customer) => sum + customer.pendingMinor,
-    );
+    final total = state.approvedReceivableByCurrency;
+    final pending = state.pendingNetByCurrency(state.merchantEntries);
 
     return Scaffold(
       appBar: AppBar(
@@ -247,8 +249,8 @@ class _CustomersSummary extends StatelessWidget {
     required this.favoriteCount,
   });
 
-  final int total;
-  final int pending;
+  final Map<String, int> total;
+  final Map<String, int> pending;
   final int count;
   final int favoriteCount;
 
@@ -292,7 +294,7 @@ class _CustomersSummary extends StatelessWidget {
               Expanded(
                 child: QSummaryCircle(
                   label: 'إجمالي المستحق',
-                  amountMinor: total,
+                  totals: total,
                   color: QColors.approvedFg,
                   size: 82,
                   hidden: state.hideAmounts,
@@ -301,7 +303,7 @@ class _CustomersSummary extends StatelessWidget {
               Expanded(
                 child: QSummaryCircle(
                   label: 'المعلق',
-                  amountMinor: pending,
+                  totals: pending,
                   color: QColors.pendingFg,
                   size: 82,
                   hidden: state.hideAmounts,
@@ -387,7 +389,14 @@ class _CustomerCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = QScope.of(context);
-    final hasPending = customer.pendingMinor > 0;
+    final hasPending = customer.pendingByCurrencyMinor.values.any(
+      (value) => value != 0,
+    );
+    final available = <String, int>{
+      for (final currency in supportedCurrencies)
+        if (customer.creditLimitFor(currency) > 0)
+          currency: customer.availableFor(currency),
+    };
     return QCard(
       onTap: onOpen,
       padding: const EdgeInsets.all(QSpace.md),
@@ -460,7 +469,7 @@ class _CustomerCard extends StatelessWidget {
               Expanded(
                 child: _Amount(
                   label: 'المعتمد',
-                  amount: customer.balanceMinor,
+                  totals: customer.balancesMinor,
                   color: QColors.approvedFg,
                   hidden: state.hideAmounts,
                 ),
@@ -468,7 +477,7 @@ class _CustomerCard extends StatelessWidget {
               Expanded(
                 child: _Amount(
                   label: 'المعلق',
-                  amount: customer.pendingMinor,
+                  totals: customer.pendingByCurrencyMinor,
                   color: QColors.pendingFg,
                   hidden: state.hideAmounts,
                 ),
@@ -476,11 +485,7 @@ class _CustomerCard extends StatelessWidget {
               Expanded(
                 child: _Amount(
                   label: 'المتاح',
-                  amount:
-                      (customer.creditLimitMinor -
-                              customer.balanceMinor -
-                              customer.pendingMinor)
-                          .clamp(0, customer.creditLimitMinor),
+                  totals: available,
                   color: QColors.brightGreen,
                   hidden: state.hideAmounts,
                 ),
@@ -530,13 +535,13 @@ class _CustomerCard extends StatelessWidget {
 class _Amount extends StatelessWidget {
   const _Amount({
     required this.label,
-    required this.amount,
+    required this.totals,
     required this.color,
     required this.hidden,
   });
 
   final String label;
-  final int amount;
+  final Map<String, int> totals;
   final Color color;
   final bool hidden;
 
@@ -548,8 +553,8 @@ class _Amount extends StatelessWidget {
         Text(label, style: Theme.of(context).textTheme.labelSmall),
         const SizedBox(height: 2),
         Text(
-          formatMoney(amount, hidden: hidden),
-          maxLines: 1,
+          formatMoneyTotals(totals, hidden: hidden, compact: true),
+          maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style: Theme.of(context).textTheme.labelLarge?.copyWith(
             color: color,

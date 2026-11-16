@@ -21,11 +21,18 @@ class CustomerHomeScreen extends StatelessWidget {
     final pending = state.customerPendingApprovals;
     final merchants = state.customerMerchants;
     final entries = state.customerEntries.take(4).toList();
-    final limit = merchants.fold<int>(
-      0,
-      (total, merchant) => total + merchant.creditLimitMinor,
-    );
-    final used = state.customerApprovedTotal + state.customerPendingTotal;
+    final limits = <String, int>{};
+    for (final merchant in merchants) {
+      for (final entry in merchant.creditLimitsMinor.entries) {
+        limits[entry.key] = (limits[entry.key] ?? 0) + entry.value;
+      }
+    }
+    final used = <String, int>{
+      for (final currency in supportedCurrencies)
+        currency:
+            (state.customerApprovedByCurrency[currency] ?? 0) +
+            (state.pendingNetByCurrency(state.customerEntries)[currency] ?? 0),
+    };
     final now = DateTime.now();
     final todayEntries = state.customerEntries.where(
       (entry) =>
@@ -33,15 +40,16 @@ class CustomerHomeScreen extends StatelessWidget {
           entry.createdAt.month == now.month &&
           entry.createdAt.day == now.day,
     );
-    final todayPayments = todayEntries
-        .where(
-          (entry) =>
-              entry.status == TxStatus.approved &&
-              (entry.type == OperationType.payment ||
-                  entry.type == OperationType.refund ||
-                  entry.type == OperationType.salesReturn),
-        )
-        .fold<int>(0, (total, entry) => total + entry.amountMinor);
+    final todayPayments = <String, int>{};
+    for (final entry in todayEntries) {
+      if (entry.status != TxStatus.approved) continue;
+      if (entry.type != OperationType.payment &&
+          state.effectOf(entry) != OperationEffect.decrease) {
+        continue;
+      }
+      todayPayments[entry.currency] =
+          (todayPayments[entry.currency] ?? 0) + entry.amountMinor;
+    }
     final todayPending = todayEntries
         .where((entry) => entry.status == TxStatus.pending)
         .length;
@@ -105,7 +113,7 @@ class CustomerHomeScreen extends StatelessWidget {
                     AdminAdsCarousel(ads: state.ads),
                   ],
                   const SizedBox(height: QSpace.lg),
-                  _BalanceCard(state: state, limit: limit, used: used),
+                  _BalanceCard(state: state, limits: limits, used: used),
                   const SizedBox(height: QSpace.lg),
                   Row(
                     children: [
@@ -260,17 +268,23 @@ class CustomerHomeScreen extends StatelessWidget {
 class _BalanceCard extends StatelessWidget {
   const _BalanceCard({
     required this.state,
-    required this.limit,
+    required this.limits,
     required this.used,
   });
 
   final AppState state;
-  final int limit;
-  final int used;
+  final Map<String, int> limits;
+  final Map<String, int> used;
 
   @override
   Widget build(BuildContext context) {
-    final pending = state.customerPendingTotal;
+    final pending = state.pendingNetByCurrency(state.customerEntries);
+    final limitTotal = limits.values.fold<int>(0, (sum, value) => sum + value);
+    final usedTotal = used.values.fold<int>(0, (sum, value) => sum + value);
+    final available = <String, int>{
+      for (final entry in limits.entries)
+        entry.key: (entry.value - (used[entry.key] ?? 0)).clamp(0, entry.value),
+    };
     return QCard(
       gradient: const LinearGradient(
         begin: Alignment.topRight,
@@ -290,20 +304,24 @@ class _BalanceCard extends StatelessWidget {
                       style: Theme.of(context).textTheme.labelMedium,
                     ),
                     const SizedBox(height: QSpace.xs),
-                    QMoney(
-                      minor: state.customerApprovedTotal,
+                    QMoneyTotals(
+                      totals: state.customerApprovedByCurrency,
                       style: Theme.of(context).textTheme.headlineMedium
                           ?.copyWith(
                             fontWeight: FontWeight.w800,
-                            color: state.customerApprovedTotal > 0
+                            color: state.customerApprovedByCurrency.values.any(
+                              (value) => value > 0,
+                            )
                                 ? QColors.rejectedFg
                                 : QColors.charcoal,
                           ),
                     ),
                     const SizedBox(height: QSpace.xs),
-                    if (pending > 0)
+                    if (pending.isNotEmpty)
                       Text(
-                        'معلق: ${formatMoney(pending, hidden: state.hideAmounts)}',
+                        'معلق: ${formatMoneyTotals(pending, hidden: state.hideAmounts, compact: true)}',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
                           color: QColors.pendingFg,
                         ),
@@ -313,19 +331,20 @@ class _BalanceCard extends StatelessWidget {
               ),
               QBalanceRing(
                 amountMinor: state.customerApprovedTotal,
+                totals: state.customerApprovedByCurrency,
                 label: 'من الحد',
-                progress: limit == 0 ? 0 : used / limit,
+                progress: limitTotal == 0 ? 0 : usedTotal / limitTotal,
                 size: 132,
                 hidden: state.hideAmounts,
                 secondaryLabel: 'المتاح',
-                secondaryAmountMinor: (limit - used).clamp(0, limit),
+                secondaryTotals: available,
               ),
             ],
           ),
           const SizedBox(height: QSpace.lg),
-          QCreditLimitBar(
+          QCreditLimitBars(
+            limitsMinor: limits,
             usedMinor: used,
-            limitMinor: limit,
             hidden: state.hideAmounts,
           ),
         ],
@@ -367,7 +386,7 @@ class _PendingCard extends StatelessWidget {
           ),
           const SizedBox(height: QSpace.md),
           Text(
-            '${merchant?.displayName ?? 'تاجر'} سجل ${formatMoney(entry.amountMinor, hidden: state.hideAmounts)}'
+            '${merchant?.displayName ?? 'تاجر'} سجل ${formatMoney(entry.amountMinor, currency: entry.currency, hidden: state.hideAmounts)}'
             '${entry.productName == null ? '' : ' • ${entry.productName}'}',
             style: Theme.of(context).textTheme.bodySmall,
           ),
@@ -418,7 +437,9 @@ class _PendingCard extends StatelessWidget {
         content: TextField(
           controller: controller,
           keyboardType: TextInputType.number,
-          decoration: const InputDecoration(labelText: 'المبلغ البديل بالريال'),
+          decoration: InputDecoration(
+            labelText: 'المبلغ البديل (${entry.currency})',
+          ),
         ),
         actions: [
           TextButton(
@@ -560,7 +581,7 @@ class _TodaySection extends StatelessWidget {
     required this.onStatement,
   });
 
-  final int payments;
+  final Map<String, int> payments;
   final int pending;
   final VoidCallback onStatement;
 
@@ -601,8 +622,12 @@ class _TodaySection extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            formatCompactMoney(payments),
-                            maxLines: 1,
+                            formatMoneyTotals(
+                              payments,
+                              compact: true,
+                              hidden: QScope.of(context).hideAmounts,
+                            ),
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: Theme.of(context).textTheme.titleMedium
                                 ?.copyWith(

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../design/components.dart';
 import '../../design/tokens.dart';
+import '../../format.dart';
 import '../../models.dart';
 import '../../state/app_state.dart';
 
@@ -18,6 +19,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
   final _amountController = TextEditingController();
   final _noteController = TextEditingController();
   String _method = 'نقداً';
+  String _currency = defaultCurrency;
   bool _withReceipt = true;
   bool _saving = false;
 
@@ -78,15 +80,30 @@ class _PaymentScreenState extends State<PaymentScreen> {
                         'المستحق',
                         style: Theme.of(context).textTheme.labelSmall,
                       ),
-                      QMoney(
-                        minor: merchant.balanceMinor,
+                      QMoneyTotals(
+                        totals: merchant.balancesMinor,
                         style: Theme.of(context).textTheme.titleSmall,
                         hidden: state.hideAmounts,
+                        textAlign: TextAlign.end,
                       ),
                     ],
                   ),
                 ],
               ),
+            ),
+            const SizedBox(height: QSpace.md),
+            Wrap(
+              spacing: QSpace.sm,
+              children: [
+                for (final currency in supportedCurrencies)
+                  ChoiceChip(
+                    label: Text(
+                      '${currencyLabels[currency] ?? currency} $currency',
+                    ),
+                    selected: _currency == currency,
+                    onSelected: (_) => setState(() => _currency = currency),
+                  ),
+              ],
             ),
             const SizedBox(height: QSpace.lg),
             TextField(
@@ -95,11 +112,11 @@ class _PaymentScreenState extends State<PaymentScreen> {
               autofocus: true,
               onChanged: (_) => setState(() {}),
               style: Theme.of(context).textTheme.headlineMedium,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'المبلغ',
                 hintText: '0',
-                suffixText: 'ر.ي',
-                prefixIcon: Icon(Icons.payments_outlined),
+                suffixText: currencyLabels[_currency] ?? _currency,
+                prefixIcon: const Icon(Icons.payments_outlined),
               ),
             ),
             const SizedBox(height: QSpace.sm),
@@ -108,17 +125,18 @@ class _PaymentScreenState extends State<PaymentScreen> {
               children: [
                 ActionChip(
                   label: const Text('سداد كامل'),
-                  onPressed: () => _setAmount(merchant.balanceMinor),
+                  onPressed: () =>
+                      _setAmount(merchant.balanceFor(_currency)),
                 ),
                 ActionChip(
                   label: const Text('النصف'),
                   onPressed: () =>
-                      _setAmount((merchant.balanceMinor / 2).round()),
+                      _setAmount((merchant.balanceFor(_currency) / 2).round()),
                 ),
                 ActionChip(
                   label: const Text('الربع'),
                   onPressed: () =>
-                      _setAmount((merchant.balanceMinor / 4).round()),
+                      _setAmount((merchant.balanceFor(_currency) / 4).round()),
                 ),
               ],
             ),
@@ -245,6 +263,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
       note: _noteController.text.trim().isEmpty
           ? null
           : _noteController.text.trim(),
+      currency: _currency,
     );
     if (!mounted) return;
     Navigator.of(context).pop();

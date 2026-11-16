@@ -57,8 +57,13 @@ class _CustomerMerchantsScreenState extends State<CustomerMerchantsScreen> {
     final summaryEntries = allEntries.where((entry) {
       return entry.status != TxStatus.rejected;
     }).toList();
-    final approved = _net(summaryEntries, TxStatus.approved).abs();
-    final pending = _pendingNet(summaryEntries).abs();
+    final approved = _netByCurrency(state, summaryEntries, TxStatus.approved);
+    final pending = _pendingByCurrency(state, summaryEntries);
+    final total = <String, int>{
+      for (final currency in {...approved.keys, ...pending.keys})
+        currency:
+            (approved[currency] ?? 0).abs() + (pending[currency] ?? 0).abs(),
+    };
     final entries = allEntries.where((entry) {
       return switch (_status) {
         1 => entry.status == TxStatus.approved,
@@ -103,9 +108,9 @@ class _CustomerMerchantsScreenState extends State<CustomerMerchantsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _TotalsBox(
-                    totalMinor: approved + pending,
-                    approvedMinor: approved,
-                    pendingMinor: pending,
+                    total: total,
+                    approved: approved,
+                    pending: pending,
                     hidden: state.hideAmounts,
                   ),
                   const SizedBox(height: QSpace.md),
@@ -246,35 +251,37 @@ class _CustomerMerchantsScreenState extends State<CustomerMerchantsScreen> {
     );
   }
 
-  int _pendingNet(List<LedgerEntry> entries) {
-    return entries
-        .where(
-          (entry) =>
-              entry.status == TxStatus.pending ||
-              entry.status == TxStatus.editRequested ||
-              entry.status == TxStatus.local,
-        )
-        .fold<int>(0, (total, entry) {
-          final signed =
-              entry.type == OperationType.charge ||
-                  entry.type == OperationType.creditApplication
-              ? entry.amountMinor
-              : -entry.amountMinor;
-          return total + signed;
-        });
+  Map<String, int> _pendingByCurrency(
+    AppState state,
+    List<LedgerEntry> entries,
+  ) {
+    final totals = <String, int>{};
+    for (final entry in entries) {
+      if (entry.status != TxStatus.pending &&
+          entry.status != TxStatus.editRequested &&
+          entry.status != TxStatus.local) {
+        continue;
+      }
+      totals[entry.currency] =
+          (totals[entry.currency] ?? 0) + state.signedEffectOf(entry);
+    }
+    totals.removeWhere((_, value) => value == 0);
+    return totals;
   }
 
-  int _net(List<LedgerEntry> entries, TxStatus status) {
-    return entries
-        .where((entry) => entry.status == status)
-        .fold<int>(0, (total, entry) {
-          final signed =
-              entry.type == OperationType.charge ||
-                  entry.type == OperationType.creditApplication
-              ? entry.amountMinor
-              : -entry.amountMinor;
-          return total + signed;
-        });
+  Map<String, int> _netByCurrency(
+    AppState state,
+    List<LedgerEntry> entries,
+    TxStatus status,
+  ) {
+    final totals = <String, int>{};
+    for (final entry in entries) {
+      if (entry.status != status) continue;
+      totals[entry.currency] =
+          (totals[entry.currency] ?? 0) + state.signedEffectOf(entry);
+    }
+    totals.removeWhere((_, value) => value == 0);
+    return totals;
   }
 
   Future<void> _pickDate(BuildContext context) async {
@@ -300,15 +307,15 @@ class _CustomerMerchantsScreenState extends State<CustomerMerchantsScreen> {
 
 class _TotalsBox extends StatelessWidget {
   const _TotalsBox({
-    required this.totalMinor,
-    required this.approvedMinor,
-    required this.pendingMinor,
+    required this.total,
+    required this.approved,
+    required this.pending,
     required this.hidden,
   });
 
-  final int totalMinor;
-  final int approvedMinor;
-  final int pendingMinor;
+  final Map<String, int> total;
+  final Map<String, int> approved;
+  final Map<String, int> pending;
   final bool hidden;
 
   @override
@@ -332,7 +339,7 @@ class _TotalsBox extends StatelessWidget {
               Expanded(
                 child: _SummaryCircle(
                   label: 'الإجمالي',
-                  amountMinor: totalMinor,
+                  totals: total,
                   color: QColors.brightGreen,
                   hidden: hidden,
                 ),
@@ -340,7 +347,7 @@ class _TotalsBox extends StatelessWidget {
               Expanded(
                 child: _SummaryCircle(
                   label: 'المعتمد',
-                  amountMinor: approvedMinor,
+                  totals: approved,
                   color: QColors.rejectedFg,
                   hidden: hidden,
                 ),
@@ -348,7 +355,7 @@ class _TotalsBox extends StatelessWidget {
               Expanded(
                 child: _SummaryCircle(
                   label: 'المعلق',
-                  amountMinor: pendingMinor,
+                  totals: pending,
                   color: QColors.pendingFg,
                   hidden: hidden,
                 ),
@@ -364,13 +371,13 @@ class _TotalsBox extends StatelessWidget {
 class _SummaryCircle extends StatelessWidget {
   const _SummaryCircle({
     required this.label,
-    required this.amountMinor,
+    required this.totals,
     required this.color,
     required this.hidden,
   });
 
   final String label;
-  final int amountMinor;
+  final Map<String, int> totals;
   final Color color;
   final bool hidden;
 
@@ -390,8 +397,12 @@ class _SummaryCircle extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.all(QSpace.xs),
             child: Text(
-              hidden ? '••••' : formatCompactMoney(amountMinor),
+              hidden
+                  ? '••••'
+                  : formatMoneyTotals(totals, compact: true),
               textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.labelLarge?.copyWith(
                 color: color,
                 fontWeight: FontWeight.w800,
@@ -425,8 +436,16 @@ class _MerchantCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = QScope.of(context);
-    final limit = merchant.creditLimitMinor;
-    final used = merchant.balanceMinor + merchant.pendingMinor;
+    final limits = merchant.creditLimitsMinor;
+    final used = {
+      for (final currency in limits.keys)
+        currency:
+            merchant.balanceFor(currency) + merchant.pendingFor(currency),
+    };
+    final available = {
+      for (final entry in limits.entries)
+        entry.key: merchant.availableFor(entry.key),
+    };
     return QCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -478,7 +497,7 @@ class _MerchantCard extends StatelessWidget {
               Expanded(
                 child: _Amount(
                   label: 'المعتمد',
-                  amount: merchant.balanceMinor,
+                  totals: merchant.balancesMinor,
                   color: QColors.approvedFg,
                   hidden: state.hideAmounts,
                 ),
@@ -486,7 +505,7 @@ class _MerchantCard extends StatelessWidget {
               Expanded(
                 child: _Amount(
                   label: 'المعلق',
-                  amount: merchant.pendingMinor,
+                  totals: merchant.pendingByCurrencyMinor,
                   color: QColors.pendingFg,
                   hidden: state.hideAmounts,
                 ),
@@ -494,7 +513,7 @@ class _MerchantCard extends StatelessWidget {
               Expanded(
                 child: _Amount(
                   label: 'المتاح',
-                  amount: (limit - used).clamp(0, limit),
+                  totals: available,
                   color: QColors.brightGreen,
                   hidden: state.hideAmounts,
                 ),
@@ -502,9 +521,9 @@ class _MerchantCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: QSpace.md),
-          QCreditLimitBar(
+          QCreditLimitBars(
+            limitsMinor: limits,
             usedMinor: used,
-            limitMinor: limit,
             hidden: state.hideAmounts,
           ),
           const SizedBox(height: QSpace.md),
@@ -536,13 +555,13 @@ class _MerchantCard extends StatelessWidget {
 class _Amount extends StatelessWidget {
   const _Amount({
     required this.label,
-    required this.amount,
+    required this.totals,
     required this.color,
     required this.hidden,
   });
 
   final String label;
-  final int amount;
+  final Map<String, int> totals;
   final Color color;
   final bool hidden;
 
@@ -554,7 +573,9 @@ class _Amount extends StatelessWidget {
         Text(label, style: Theme.of(context).textTheme.labelSmall),
         const SizedBox(height: 2),
         Text(
-          formatMoney(amount, hidden: hidden),
+          formatMoneyTotals(totals, hidden: hidden, compact: true),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
           style: Theme.of(context).textTheme.labelLarge?.copyWith(
             color: color,
             fontWeight: FontWeight.w700,

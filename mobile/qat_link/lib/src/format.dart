@@ -1,3 +1,5 @@
+import 'models.dart';
+
 const currencyLabels = <String, String>{
   'YER': 'ر.ي',
   'SAR': 'ر.س',
@@ -21,6 +23,31 @@ String formatMoney(int minor, {String currency = 'YER', bool hidden = false}) {
   if (hidden) return '••••••';
   final major = (minor / 100).round();
   return '${formatNumber(major)} ${currencyLabels[currency] ?? currency}';
+}
+
+String formatMoneyTotals(
+  Map<String, int> totals, {
+  bool hidden = false,
+  bool compact = false,
+  bool includeZero = false,
+}) {
+  if (hidden) return '••••••';
+  final ordered = <String>[
+    ...supportedCurrencies.where(totals.containsKey),
+    ...totals.keys.where((currency) => !supportedCurrencies.contains(currency)),
+  ];
+  final parts = <String>[];
+  for (final currency in ordered) {
+    final value = totals[currency] ?? 0;
+    if (value == 0 && !includeZero) continue;
+    parts.add(
+      compact
+          ? formatCompactMoney(value, currency: currency)
+          : formatMoney(value, currency: currency),
+    );
+  }
+  if (parts.isEmpty) return '0';
+  return parts.join(' • ');
 }
 
 String formatCompactMoney(int minor, {String currency = 'YER'}) {

@@ -1,3 +1,6 @@
+const defaultCurrency = 'YER';
+const supportedCurrencies = ['YER', 'SAR', 'USD'];
+
 enum AppPersona { merchant, customer }
 
 enum AccountType { customer, merchant, supplier }
@@ -28,6 +31,48 @@ enum OperationType {
   reversal,
   allocation,
   creditApplication,
+  supply,
+}
+
+enum OperationEffect { increase, decrease, neutral }
+
+extension OperationEffectLabel on OperationEffect {
+  String get label => switch (this) {
+    OperationEffect.increase => 'زيادة الدين',
+    OperationEffect.decrease => 'تخفيض الدين',
+    OperationEffect.neutral => 'بلا أثر صافي',
+  };
+
+  String get sign => switch (this) {
+    OperationEffect.increase => '+',
+    OperationEffect.decrease => '−',
+    OperationEffect.neutral => '•',
+  };
+
+  int apply(int amountMinor) => switch (this) {
+    OperationEffect.increase => amountMinor,
+    OperationEffect.decrease => -amountMinor,
+    OperationEffect.neutral => 0,
+  };
+
+  OperationEffect get inverse => switch (this) {
+    OperationEffect.increase => OperationEffect.decrease,
+    OperationEffect.decrease => OperationEffect.increase,
+    OperationEffect.neutral => OperationEffect.neutral,
+  };
+}
+
+extension OperationTypeEffect on OperationType {
+  OperationEffect get baseEffect => switch (this) {
+    OperationType.charge => OperationEffect.increase,
+    OperationType.payment => OperationEffect.neutral,
+    OperationType.salesReturn => OperationEffect.decrease,
+    OperationType.refund => OperationEffect.increase,
+    OperationType.reversal => OperationEffect.neutral,
+    OperationType.allocation => OperationEffect.decrease,
+    OperationType.creditApplication => OperationEffect.neutral,
+    OperationType.supply => OperationEffect.neutral,
+  };
 }
 
 enum TxStatus { pending, approved, rejected, editRequested, local, syncing }
@@ -45,6 +90,7 @@ extension OperationTypeLabel on OperationType {
     OperationType.reversal => 'عكس عملية',
     OperationType.allocation => 'تخصيص دفعة',
     OperationType.creditApplication => 'تطبيق رصيد',
+    OperationType.supply => 'توريد',
   };
 }
 
@@ -78,7 +124,7 @@ class AppUser {
 }
 
 class Contact {
-  const Contact({
+  Contact({
     required this.id,
     required this.name,
     required this.phone,
@@ -86,12 +132,32 @@ class Contact {
     this.storeName = '',
     this.category = '',
     this.address = '',
-    this.balanceMinor = 0,
-    this.pendingMinor = 0,
+    int balanceMinor = 0,
+    int pendingMinor = 0,
+    Map<String, int>? balancesMinor,
+    Map<String, int>? pendingByCurrencyMinor,
     this.favorite = false,
     this.hasApp = true,
-    this.creditLimitMinor = 0,
-  });
+    int creditLimitMinor = 0,
+    Map<String, int>? creditLimitsMinor,
+  }) : balancesMinor = Map.unmodifiable(
+         balancesMinor ??
+             (balanceMinor == 0
+                 ? const <String, int>{}
+                 : {defaultCurrency: balanceMinor}),
+       ),
+       pendingByCurrencyMinor = Map.unmodifiable(
+         pendingByCurrencyMinor ??
+             (pendingMinor == 0
+                 ? const <String, int>{}
+                 : {defaultCurrency: pendingMinor}),
+       ),
+       creditLimitsMinor = Map.unmodifiable(
+         creditLimitsMinor ??
+             (creditLimitMinor == 0
+                 ? const <String, int>{}
+                 : {defaultCurrency: creditLimitMinor}),
+       );
 
   final String id;
   final String name;
@@ -100,23 +166,70 @@ class Contact {
   final String storeName;
   final String category;
   final String address;
-  final int balanceMinor;
-  final int pendingMinor;
+  final Map<String, int> balancesMinor;
+  final Map<String, int> pendingByCurrencyMinor;
+  final Map<String, int> creditLimitsMinor;
   final bool favorite;
   final bool hasApp;
-  final int creditLimitMinor;
 
   String get displayName => storeName.isNotEmpty ? storeName : name;
+
+  int creditLimitFor(String currency) => creditLimitsMinor[currency] ?? 0;
+
+  int get creditLimitMinor => creditLimitFor(defaultCurrency);
+
+  int availableFor(String currency) {
+    final limit = creditLimitFor(currency);
+    if (limit <= 0) return 0;
+    return (limit - balanceFor(currency) - pendingFor(currency)).clamp(0, limit);
+  }
+
+  int balanceFor(String currency) => balancesMinor[currency] ?? 0;
+
+  int pendingFor(String currency) => pendingByCurrencyMinor[currency] ?? 0;
+
+  int get balanceMinor => balanceFor(defaultCurrency);
+
+  int get pendingMinor => pendingFor(defaultCurrency);
+
+  bool get hasAnyBalance =>
+      balancesMinor.values.any((value) => value != 0) ||
+      pendingByCurrencyMinor.values.any((value) => value != 0);
+
+  String get primaryCurrency {
+    for (final entry in balancesMinor.entries) {
+      if (entry.value != 0) return entry.key;
+    }
+    for (final entry in pendingByCurrencyMinor.entries) {
+      if (entry.value != 0) return entry.key;
+    }
+    return defaultCurrency;
+  }
 
   Contact copyWith({
     int? balanceMinor,
     int? pendingMinor,
+    Map<String, int>? balancesMinor,
+    Map<String, int>? pendingByCurrencyMinor,
     bool? favorite,
     bool? hasApp,
     int? creditLimitMinor,
+    Map<String, int>? creditLimitsMinor,
     String? storeName,
     String? address,
   }) {
+    var nextBalances = balancesMinor ?? this.balancesMinor;
+    if (balanceMinor != null) {
+      nextBalances = {...nextBalances, defaultCurrency: balanceMinor};
+    }
+    var nextPending = pendingByCurrencyMinor ?? this.pendingByCurrencyMinor;
+    if (pendingMinor != null) {
+      nextPending = {...nextPending, defaultCurrency: pendingMinor};
+    }
+    var nextLimits = creditLimitsMinor ?? this.creditLimitsMinor;
+    if (creditLimitMinor != null) {
+      nextLimits = {...nextLimits, defaultCurrency: creditLimitMinor};
+    }
     return Contact(
       id: id,
       name: name,
@@ -125,11 +238,11 @@ class Contact {
       storeName: storeName ?? this.storeName,
       category: category,
       address: address ?? this.address,
-      balanceMinor: balanceMinor ?? this.balanceMinor,
-      pendingMinor: pendingMinor ?? this.pendingMinor,
+      balancesMinor: nextBalances,
+      pendingByCurrencyMinor: nextPending,
       favorite: favorite ?? this.favorite,
       hasApp: hasApp ?? this.hasApp,
-      creditLimitMinor: creditLimitMinor ?? this.creditLimitMinor,
+      creditLimitsMinor: nextLimits,
     );
   }
 }
@@ -151,6 +264,7 @@ class LedgerEntry {
     required this.amountMinor,
     required this.status,
     required this.createdAt,
+    this.currency = defaultCurrency,
     this.note,
     this.productName,
     this.createdByMe = true,
@@ -158,6 +272,7 @@ class LedgerEntry {
     this.history = const [],
     this.proposedAmountMinor,
     this.serverVersion = 0,
+    this.originalOperationId,
   });
 
   final String id;
@@ -165,6 +280,7 @@ class LedgerEntry {
   final String merchantId;
   final OperationType type;
   final int amountMinor;
+  final String currency;
   final TxStatus status;
   final DateTime createdAt;
   final String? note;
@@ -174,14 +290,19 @@ class LedgerEntry {
   final List<TxEvent> history;
   final int? proposedAmountMinor;
   final int serverVersion;
+  final String? originalOperationId;
+
+  OperationEffect get baseEffect => type.baseEffect;
 
   LedgerEntry copyWith({
     TxStatus? status,
+    String? currency,
     List<TxEvent>? history,
     int? photoCount,
     int? proposedAmountMinor,
     bool clearProposedAmount = false,
     int? serverVersion,
+    String? originalOperationId,
   }) {
     return LedgerEntry(
       id: id,
@@ -189,6 +310,7 @@ class LedgerEntry {
       merchantId: merchantId,
       type: type,
       amountMinor: amountMinor,
+      currency: currency ?? this.currency,
       status: status ?? this.status,
       createdAt: createdAt,
       note: note,
@@ -200,8 +322,26 @@ class LedgerEntry {
           ? null
           : (proposedAmountMinor ?? this.proposedAmountMinor),
       serverVersion: serverVersion ?? this.serverVersion,
+      originalOperationId:
+          originalOperationId ?? this.originalOperationId,
     );
   }
+}
+
+class PendingBreakdown {
+  const PendingBreakdown({
+    required this.currency,
+    required this.type,
+    required this.effect,
+    required this.amountMinor,
+  });
+
+  final String currency;
+  final OperationType type;
+  final OperationEffect effect;
+  final int amountMinor;
+
+  int get signedAmountMinor => effect.apply(amountMinor);
 }
 
 class Employee {
