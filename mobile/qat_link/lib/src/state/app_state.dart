@@ -642,11 +642,15 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void approveEntry(String entryId) {
+  Future<void> approveEntry(String entryId) async {
     final index = entries.indexWhere((entry) => entry.id == entryId);
     if (index == -1) return;
     final entry = entries[index];
     if (entry.status != TxStatus.pending) return;
+    if (isRemote) {
+      await _decideRemote(entry, 'approved');
+      return;
+    }
     final customer = contactById(entry.customerId);
     entries[index] = entry.copyWith(
       status: TxStatus.approved,
@@ -677,15 +681,16 @@ class AppState extends ChangeNotifier {
       );
     }
     notifyListeners();
-    if (isRemote) {
-      _fireRemote(_decideRemote(entries[index], 'approved'));
-    }
   }
 
-  void rejectEntry(String entryId) {
+  Future<void> rejectEntry(String entryId) async {
     final index = entries.indexWhere((entry) => entry.id == entryId);
     if (index == -1) return;
     final entry = entries[index];
+    if (isRemote) {
+      await _decideRemote(entry, 'rejected');
+      return;
+    }
     final customer = contactById(entry.customerId);
     entries[index] = entry.copyWith(
       status: TxStatus.rejected,
@@ -708,14 +713,20 @@ class AppState extends ChangeNotifier {
       );
     }
     notifyListeners();
-    if (isRemote) {
-      _fireRemote(_decideRemote(entries[index], 'rejected'));
-    }
   }
 
-  void requestEdit(String entryId, int proposedAmountMinor, String note) {
+  Future<bool> requestEdit(
+    String entryId,
+    int proposedAmountMinor,
+    String note,
+  ) async {
+    if (isRemote) {
+      remoteError = 'طلب تعديل المبلغ غير متاح عبر الخادم بعد';
+      notifyListeners();
+      return false;
+    }
     final index = entries.indexWhere((entry) => entry.id == entryId);
-    if (index == -1) return;
+    if (index == -1) return false;
     final entry = entries[index];
     entries[index] = entry.copyWith(
       status: TxStatus.editRequested,
@@ -730,11 +741,17 @@ class AppState extends ChangeNotifier {
       ],
     );
     notifyListeners();
+    return true;
   }
 
-  void acceptEdit(String entryId) {
+  Future<bool> acceptEdit(String entryId) async {
+    if (isRemote) {
+      remoteError = 'قبول المبلغ البديل غير متاح عبر الخادم بعد';
+      notifyListeners();
+      return false;
+    }
     final index = entries.indexWhere((entry) => entry.id == entryId);
-    if (index == -1) return;
+    if (index == -1) return false;
     final entry = entries[index];
     final nextAmount = entry.proposedAmountMinor ?? entry.amountMinor;
     final customer = contactById(entry.customerId);
@@ -765,11 +782,17 @@ class AppState extends ChangeNotifier {
       );
     }
     notifyListeners();
+    return true;
   }
 
-  void declineEdit(String entryId) {
+  Future<bool> declineEdit(String entryId) async {
+    if (isRemote) {
+      remoteError = 'رفض المبلغ البديل غير متاح عبر الخادم بعد';
+      notifyListeners();
+      return false;
+    }
     final index = entries.indexWhere((entry) => entry.id == entryId);
-    if (index == -1) return;
+    if (index == -1) return false;
     final entry = entries[index];
     final customer = contactById(entry.customerId);
     entries[index] = entry.copyWith(
@@ -794,6 +817,7 @@ class AppState extends ChangeNotifier {
       );
     }
     notifyListeners();
+    return true;
   }
 
   void addPayment({

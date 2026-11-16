@@ -104,6 +104,57 @@ void main() {
     expect(api.session, isNull);
   });
 
+  test('remote approvals wait for the server and edits are blocked', () async {
+    var decided = false;
+    final api = QatLinkApi(
+      baseUri: Uri.parse('https://api.qatlink.test'),
+      client: MockClient((request) async {
+        final path = request.url.path;
+        if (path ==
+            '/v1/relationships/rel-1/operations/op-1/decision') {
+          decided = true;
+          return _json({'status': 'approved'});
+        }
+        if (path == '/v1/relationships/rel-1/operations') {
+          return _json(_operationsBody(approved: decided));
+        }
+        return _handler(request);
+      }),
+    );
+    final state = AppState(
+      seed: false,
+      api: api,
+      sessionStore: MemoryQatLinkSessionStore(deviceId: 'device-1'),
+    );
+
+    await state.verifyOtp(phone: '+967 700 000 001', code: '123456');
+    final before = state.contacts.single.balanceFor('YER');
+    final pendingBefore = state.contacts.single.pendingFor('YER');
+
+    final approval = state.approveEntry('op-1');
+    expect(
+      state.entries.firstWhere((entry) => entry.id == 'op-1').status,
+      TxStatus.pending,
+    );
+    expect(state.contacts.single.balanceFor('YER'), before);
+    expect(state.contacts.single.pendingFor('YER'), pendingBefore);
+
+    await approval;
+    expect(decided, isTrue);
+    expect(
+      state.entries.firstWhere((entry) => entry.id == 'op-1').status,
+      TxStatus.approved,
+    );
+    expect(state.contacts.single.balanceFor('YER'), 1200000);
+    expect(state.contacts.single.pendingFor('YER'), 0);
+
+    final editSent = await state.requestEdit('op-2', 100, 'طلب تعديل');
+    expect(editSent, isFalse);
+    expect(
+      state.entries.firstWhere((entry) => entry.id == 'op-2').status,
+      TxStatus.pending,
+    );
+  });
 }
 
 Map<String, Object?> _operationsBody({required bool approved}) {

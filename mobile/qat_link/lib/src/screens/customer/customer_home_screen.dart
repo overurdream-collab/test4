@@ -457,8 +457,17 @@ class _PendingCard extends StatelessWidget {
       ),
     );
     if (amount != null) {
-      state.requestEdit(entry.id, amount, 'طلب تعديل من العميل');
-      if (context.mounted) QToast.show(context, 'تم إرسال طلب التعديل');
+      final sent = await state.requestEdit(
+        entry.id,
+        amount,
+        'طلب تعديل من العميل',
+      );
+      if (context.mounted) {
+        QToast.show(
+          context,
+          sent ? 'تم إرسال طلب التعديل' : 'طلب التعديل غير متاح بعد',
+        );
+      }
     }
   }
 }

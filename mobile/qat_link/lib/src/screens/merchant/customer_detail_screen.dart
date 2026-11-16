@@ -431,14 +431,24 @@ class _InlineActions extends StatelessWidget {
         children: [
           Expanded(
             child: OutlinedButton(
-              onPressed: () => state.declineEdit(entry.id),
+              onPressed: () async {
+                final changed = await state.declineEdit(entry.id);
+                if (!changed && context.mounted) {
+                  QToast.show(context, 'رفض البديل غير متاح بعد');
+                }
+              },
               child: const Text('رفض البديل'),
             ),
           ),
           const SizedBox(width: QSpace.sm),
           Expanded(
             child: FilledButton(
-              onPressed: () => state.acceptEdit(entry.id),
+              onPressed: () async {
+                final changed = await state.acceptEdit(entry.id);
+                if (!changed && context.mounted) {
+                  QToast.show(context, 'قبول البديل غير متاح بعد');
+                }
+              },
               child: const Text('قبول البديل'),
             ),
           ),
@@ -508,8 +518,17 @@ class _InlineActions extends StatelessWidget {
       ),
     );
     if (amount != null) {
-      state.requestEdit(entry.id, amount, 'طلب تعديل من التاجر');
-      if (context.mounted) QToast.show(context, 'تم إرسال طلب التعديل');
+      final sent = await state.requestEdit(
+        entry.id,
+        amount,
+        'طلب تعديل من التاجر',
+      );
+      if (context.mounted) {
+        QToast.show(
+          context,
+          sent ? 'تم إرسال طلب التعديل' : 'طلب التعديل غير متاح بعد',
+        );
+      }
     }
   }
 }
